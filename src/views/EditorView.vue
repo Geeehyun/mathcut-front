@@ -119,7 +119,7 @@ const shapeInstructions: Partial<Record<ShapeType, string>> = {
   'rect-rectangle': '대각선의 두 점을 클릭하세요',
   'rect-trapezoid': '밑변의 두 점을 찍고 세 번째 점으로 윗변을 정하세요',
   'rect-rhombus': '네 점을 클릭하세요',
-  'rect-parallelogram': '네 점을 클릭하세요',
+  'rect-parallelogram': '세 점을 클릭하세요',
   'rect-free': '네 개의 점을 클릭하세요',
   'polygon-regular': '중심과 꼭짓점을 클릭하면 정다각형이 생성됩니다',
   'free-shape': '점을 클릭하고, 첫 점을 다시 클릭하면 완성됩니다',
@@ -290,7 +290,7 @@ function isShapeGuideItemVisibleInLayer(
 // 안내 문구
 const instruction = computed(() => {
   if (toolStore.mode === 'select') {
-    return '도형을 클릭하여 선택하거나 드래그해 이동합니다'
+    return '도형을 클릭해 선택하거나, Space를 누른 채 드래그하여 화면을 이동합니다.' 
   }
 
   if (toolStore.mode === 'shape') {
@@ -396,7 +396,15 @@ const groupedLayers = computed(() => {
       visible: isShapeGuideItemVisibleInLayer(shape, 'angle', aIndex)
     }))
 
-    const heightItems = (!isOpenShape && shape.type !== 'circle' && shape.type !== 'triangle-right' && shape.points.length >= 3)
+    const heightItems = (
+      !isOpenShape
+      && shape.type !== 'circle'
+      && shape.type !== 'triangle-right'
+      && shape.type !== 'rectangle'
+      && shape.type !== 'rect-rectangle'
+      && shape.type !== 'rect-square'
+      && shape.points.length >= 3
+    )
       ? [{
         id: `auto-height-${shape.id}-0`,
         icon: '↕',

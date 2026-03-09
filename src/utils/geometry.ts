@@ -419,9 +419,10 @@ export function computeParallelogram(p1: Point, p2: Point, p3: Point): Point {
 
 /**
  * 사다리꼴(이등변 기준): 3점 → 4번째 꼭짓점 계산
- * p1-p2를 밑변으로 두고, p3를 윗변의 한 꼭짓점으로 사용한다.
+ * p1-p2를 밑변으로 두고, p3를 윗변의 한 꼭짓점 후보로 사용한다.
  * p3를 밑변 축으로 분해한 뒤, 축 좌표를 밑변 중앙 기준 대칭시켜 p4를 만든다.
- * 반환: [p1, p2, p4, p3] (시계 방향)
+ * 반환 순서는 항상 "p2 다음 꼭짓점"이 먼저 오도록 정렬하여
+ * [p1, p2, nearP2Top, otherTop] 형태를 보장한다.
  */
 export function computeTrapezoidFromThreePoints(p1: Point, p2: Point, p3: Point): [Point, Point, Point, Point] {
   const bx = p2.x - p1.x
@@ -447,7 +448,13 @@ export function computeTrapezoidFromThreePoints(p1: Point, p2: Point, p3: Point)
     p1.y + uy * tMirror + ny * h
   )
 
-  return [p1, p2, p4, p3]
+  // 교차(모래시계) 방지:
+  // 윗변 점 중 p2에 더 가까운 점을 p2 다음 꼭짓점으로 둔다.
+  // t < len/2면 클릭점(p3)이 p1 쪽에 가까우므로 p4를 먼저 배치한다.
+  if (t < len * 0.5) {
+    return [p1, p2, p4, p3]
+  }
+  return [p1, p2, p3, p4]
 }
 
 /**

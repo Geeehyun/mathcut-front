@@ -56,10 +56,12 @@ const ANGLE_ARC_RADIUS = 20
 const ANGLE_LABEL_OUTER_GAP_PX = 5
 const RIGHT_ANGLE_LABEL_DIST_MULTIPLIER = 3
 const ANGLE_LABEL_EDGE_PADDING_PX = 4
-const NON_RIGHT_ANGLE_LABEL_EXTRA_GAP_PX = 6
+const NON_RIGHT_ANGLE_LABEL_EXTRA_GAP_PX = 4
 const ANGLE_LABEL_BASELINE_COMPENSATION_RATIO = 0.09
-const NON_RIGHT_ANGLE_VERTICAL_LIFT_START_DEG = 90
-const NON_RIGHT_ANGLE_VERTICAL_LIFT_MAX_PX = 7
+const NON_RIGHT_ANGLE_BASELINE_LIFT_PX = 4
+const OBTUSE_ANGLE_START_DEG = 100
+const OBTUSE_ANGLE_GAP_REDUCE_MAX_PX = 3
+const OBTUSE_ANGLE_LIFT_REDUCE_MAX_PX = 2
 const RIGHT_ANGLE_LABEL_QUADRANT_X_RATIO = 0.56
 const RIGHT_ANGLE_LABEL_VERTICAL_BASE_RATIO = -0.27
 const RIGHT_ANGLE_LABEL_VERTICAL_QUADRANT_RATIO = -0.36
@@ -93,13 +95,13 @@ const props = withDefaults(defineProps<{
   interactionLocked: false
 })
 
-// ?쇰━??罹붾쾭???ш린 (?대낫?닿린 ?깆뿉???ъ슜)
+// Base canvas size (used as minimum stage size)
 const canvasWidth = GRID_CONFIG.size * GRID_CONFIG.width
 const canvasHeight = GRID_CONFIG.size * GRID_CONFIG.height
 const stageRef = ref<any>(null)
 const zoomScale = computed(() => toolStore.zoom / 100)
 
-// 而⑦뀒?대꼫 ?ш린 媛먯? (?숈쟻 stage ?ш린)
+// Track container size (for responsive stage sizing)
 const containerRef = ref<HTMLDivElement | null>(null)
 const containerSize = ref({ width: canvasWidth, height: canvasHeight })
 let resizeObserver: ResizeObserver | null = null
@@ -145,7 +147,7 @@ function handleWindowKeyup(e: KeyboardEvent) {
   }
 }
 
-// ?ㅼ젣 ?뚮뜑留?stage ?ш린: 而⑦뀒?대꼫瑜?媛??梨꾩슦??理쒖냼 ?쇰━ 罹붾쾭???ш린 蹂댁옣
+// Rendered stage size: fill container while keeping minimum canvas size
 const stageWidth = computed(() => Math.max(canvasWidth, containerSize.value.width))
 const stageHeight = computed(() => Math.max(canvasHeight, containerSize.value.height))
 const gridShapeRenderKey = computed(
@@ -208,7 +210,7 @@ const pointLabelValue = ref('')
 const pointLabelUseLatex = ref(false)
 const pointLabelInputRef = ref<HTMLInputElement | null>(null)
 const pointLabelPanelRef = ref<HTMLElement | null>(null)
-// Konva 罹붾쾭??DOM??吏곸젒 而ㅼ꽌 ?ㅼ젙 (CSS ?대옒?ㅻ뒗 canvas ?붿냼???곸슜 ????
+// Set cursor style directly on Konva container DOM.
 watchEffect(() => {
   const stage = stageRef.value?.getNode?.()
   if (!stage) return
@@ -321,10 +323,10 @@ function drawMainGridDots(context: any, shape: any) {
   context.fillStrokeShape(shape)
 }
 
-// ?대┃ ?대깽??泥섎━
+// Canvas click handler
 function handleClick(e: KonvaEventObject<MouseEvent>) {
   if (props.interactionLocked) return
-  // ?고겢由??좏겢由?뿉?쒕뒗 洹몃━湲??대┃ ?숈옉??留됰뒗??
+  // Ignore non-left clicks while drawing.
   if (e.evt.button !== 0) return
 
   if (suppressCanvasClick.value) {
@@ -338,7 +340,7 @@ function handleClick(e: KonvaEventObject<MouseEvent>) {
   const pos = stage.getPointerPosition()
   if (!pos) return
 
-  // '????꾩쓽 ??? ?뚭꺽???ㅻ깄, ?섎㉧吏??硫붿씤 寃⑹옄 ?ㅻ깄
+  // Use sub-grid snap only for point-on-object, otherwise snap to main grid.
   const useSubGrid = toolStore.mode === 'shape' && toolStore.shapeType === 'point-on-object'
   const point = useSubGrid ? snapToSubGrid(pos.x, pos.y) : snapToGrid(pos.x, pos.y)
 
@@ -437,7 +439,7 @@ function handleMouseMove(e: KonvaEventObject<MouseEvent>) {
 
   mousePos.value = snapToGrid(pos.x, pos.y)
 
-  // 留덉슦??醫뚰몴 emit (?곹깭 諛붿슜, 寃⑹옄 ?⑥쐞)
+  // Emit mouse position in grid coordinates for status display.
   emit('mouseMove', {
     x: Math.round(pos.x / GRID_CONFIG.size),
     y: Math.round(pos.y / GRID_CONFIG.size)
@@ -520,7 +522,7 @@ function handleMouseMove(e: KonvaEventObject<MouseEvent>) {
     return
   }
 
-  // 湲몄씠 媛?대뱶 ?쒕옒洹?泥섎━
+  // Length guide drag handling
   if (toolStore.mode === 'guide' && toolStore.guideType === 'length') {
     updateLengthGuideDrag(pos)
   }
@@ -923,7 +925,7 @@ function handleNativeContextMenu(e: MouseEvent) {
     return
   }
 
-  // ?고겢由???ESC泥섎읆 ?꾩옱 洹몃━湲??곹깭瑜?痍⑥냼?쒕떎.
+  // Right-click works like ESC: cancel current drawing state.
   if (toolStore.tempPoints.length > 0 || textInputState.value || pointLabelEditState.value) {
     toolStore.clearTempPoints()
     canvasStore.selectShape(null)
@@ -972,7 +974,7 @@ function getGuideNodeName(guideId: string) {
   return `guide-hit-${guideId}`
 }
 
-// ?꾪삎 ?ㅺ컖???ъ씤??諛곗뿴
+// Convert point objects to flat polygon points array
 function getPolygonPoints(points: { x: number, y: number }[]): number[] {
   return points.flatMap(p => [p.x, p.y])
 }
@@ -1265,18 +1267,20 @@ function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: num
   }
 
   let centerDist = boundaryDist + ANGLE_LABEL_OUTER_GAP_PX + halfExtentAlongBisector
-  let nonRightAngleVerticalLiftPx = 0
+  let nonRightAngleLiftPx = NON_RIGHT_ANGLE_BASELINE_LIFT_PX
   if (isRightAngle) {
     const markerDiag = RIGHT_ANGLE_MARKER_SIZE * Math.SQRT2
     const preferred = markerDiag * RIGHT_ANGLE_LABEL_DIST_MULTIPLIER
     const minimum = boundaryDist + 2 + (halfExtentAlongBisector * 0.85)
     centerDist = Math.max(minimum, Math.min(centerDist, preferred))
   } else {
-    centerDist += NON_RIGHT_ANGLE_LABEL_EXTRA_GAP_PX
     const dot = Math.max(-1, Math.min(1, (u1x * u2x) + (u1y * u2y)))
     const angleDeg = (Math.acos(dot) * 180) / Math.PI
-    const acuteRatio = Math.max(0, Math.min(1, (NON_RIGHT_ANGLE_VERTICAL_LIFT_START_DEG - angleDeg) / NON_RIGHT_ANGLE_VERTICAL_LIFT_START_DEG))
-    nonRightAngleVerticalLiftPx = NON_RIGHT_ANGLE_VERTICAL_LIFT_MAX_PX * acuteRatio
+    const obtuseRatio = Math.max(0, Math.min(1, (angleDeg - OBTUSE_ANGLE_START_DEG) / (180 - OBTUSE_ANGLE_START_DEG)))
+    const gapReduce = OBTUSE_ANGLE_GAP_REDUCE_MAX_PX * obtuseRatio
+    const liftReduce = OBTUSE_ANGLE_LIFT_REDUCE_MAX_PX * obtuseRatio
+    centerDist += Math.max(0, NON_RIGHT_ANGLE_LABEL_EXTRA_GAP_PX - gapReduce)
+    nonRightAngleLiftPx = Math.max(0, NON_RIGHT_ANGLE_BASELINE_LIFT_PX - liftReduce)
     // Temporary: disable acute-angle radial push for visual baseline testing.
     // const dot = Math.max(-1, Math.min(1, (u1x * u2x) + (u1y * u2y)))
     // const angleRad = Math.acos(dot)
@@ -1297,7 +1301,7 @@ function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: num
     cx += sx * (fontSize * RIGHT_ANGLE_LABEL_QUADRANT_X_RATIO)
     cy += fontSize * (RIGHT_ANGLE_LABEL_VERTICAL_BASE_RATIO + (RIGHT_ANGLE_LABEL_VERTICAL_QUADRANT_RATIO * sy))
   } else {
-    cy += (fontSize * ANGLE_LABEL_BASELINE_COMPENSATION_RATIO) - nonRightAngleVerticalLiftPx
+    cy += (fontSize * ANGLE_LABEL_BASELINE_COMPENSATION_RATIO) - nonRightAngleLiftPx
   }
 
   const getRect = () => ({
@@ -1331,9 +1335,11 @@ function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: num
       minDist = Math.min(minDist, d)
     }
     if (!hasIntersect && minDist >= (Math.max(halfH * 0.35, ANGLE_LABEL_EDGE_PADDING_PX))) break
-    // Angle label push-away is temporarily disabled for visual testing.
-    // cx += bx * (ANGLE_LABEL_EDGE_PADDING_PX + 1)
-    // cy += by * (ANGLE_LABEL_EDGE_PADDING_PX + 1)
+    // Keep right-angle only stabilization; disable non-right push-away to avoid over-separation.
+    // if (!isRightAngle) {
+    //   cx += bx * ANGLE_LABEL_EDGE_PADDING_PX
+    //   cy += by * ANGLE_LABEL_EDGE_PADDING_PX
+    // }
   }
 
   return { x: cx, y: cy }
@@ -2976,25 +2982,25 @@ defineExpose({ exportImage })
       @mousemove="handleMouseMove"
       @mouseup="handleMouseUp"
     >
-      <!-- 寃⑹옄 ?덉씠??-->
+      <!-- Grid layer -->
       <v-layer :config="{ listening: false }">
         <v-rect :config="{ x: 0, y: 0, width: stageWidth, height: stageHeight, fill: toolStore.gridBackgroundColor }" />
-        <!-- gridMode === 'grid': 寃⑹옄?좊쭔 ?쒖떆 -->
+        <!-- gridMode === 'grid': show grid lines -->
         <template v-if="toolStore.gridMode === 'grid'">
           <v-shape :key="`grid-${gridShapeRenderKey}`" :config="{ sceneFunc: drawGridLines, listening: false }" />
         </template>
 
-        <!-- gridMode === 'dots': 瑗?????먮쭔 ?쒖떆 -->
+        <!-- gridMode === 'dots': show main dots only -->
         <template v-else-if="toolStore.gridMode === 'dots'">
           <v-shape :key="`dots-${gridShapeRenderKey}`" :config="{ sceneFunc: drawMainGridDots, listening: false }" />
         </template>
 
-        <!-- gridMode === 'none': ?꾨Т寃껊룄 ?뚮뜑留?????-->
+        <!-- gridMode === 'none': render background only -->
       </v-layer>
 
-      <!-- ?꾪삎 ?덉씠??-->
+      <!-- Shape layer -->
       <v-layer>
-        <!-- ?꾩꽦???꾪삎??-->
+        <!-- Existing shapes -->
         <template v-for="shape in canvasStore.shapes" :key="shape.id">
           <template v-if="shape.type === 'point' || shape.type === 'point-on-object'">
             <v-circle
@@ -3059,7 +3065,7 @@ defineExpose({ exportImage })
             />
           </template>
 
-          <!-- ?ㅺ컖????-->
+          <!-- Non-circle shapes -->
           <template v-else-if="shape.type !== 'circle'">
             <template v-if="shape.type === 'arrow' || shape.type === 'arrow-curve'">
               <v-line
@@ -3153,7 +3159,7 @@ defineExpose({ exportImage })
                 }"
               />
             </template>
-            <!-- 瑗????-->
+            <!-- Shape points -->
             <template v-for="(point, pIndex) in shape.points" :key="`${shape.id}-point-${pIndex}`">
               <v-circle
                 v-if="isShapePointVisible(shape, pIndex)"
@@ -3704,7 +3710,7 @@ defineExpose({ exportImage })
                 hitStrokeWidth: 14
               }"
             />
-            <!-- 以묒떖 ?쇰꺼 -->
+            <!-- Blank point-name box -->
             <v-rect
               v-if="toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && isShapeGuideItemBlank(shape, 'pointName', 0)"
               @dblclick="handlePointLabelDblClick(shape, 0, $event)"
@@ -4015,9 +4021,9 @@ defineExpose({ exportImage })
           />
         </template>
 
-        <!-- ?꾩떆 ?꾪삎 (洹몃━??以? -->
+        <!-- Shape preview while drawing -->
         <template v-if="toolStore.mode === 'shape' && toolStore.tempPoints.length > 0">
-          <!-- ?꾩떆 ??-->
+          <!-- Preview polyline -->
           <v-line
             v-if="toolStore.tempPoints.length > 1 && toolStore.shapeType !== 'arrow-curve'"
             :config="{
@@ -4027,18 +4033,7 @@ defineExpose({ exportImage })
               dash: [5, 5]
             }"
           />
-          <!-- ?꾩떆 ?먮뱾 -->
-          <v-circle
-            v-for="(point, index) in toolStore.tempPoints"
-            :key="`temp-${index}`"
-            :config="{
-              x: point.x,
-              y: point.y,
-              radius: 4,
-              fill: '#FF9800'
-            }"
-          />
-          <!-- ??誘몃━蹂닿린 -->
+          <!-- Circle preview -->
           <v-circle
             v-if="toolStore.shapeType === 'circle' && toolStore.tempPoints.length === 2"
             :config="{
@@ -4050,7 +4045,7 @@ defineExpose({ exportImage })
               dash: [5, 5]
             }"
           />
-          <!-- ?쇰컲 ?꾪삎 誘몃━蹂닿린 -->
+          <!-- Arrow preview -->
           <v-line
             v-if="(toolStore.shapeType === 'arrow' || toolStore.shapeType === 'arrow-curve') && mousePos && toolStore.tempPoints.length >= 1"
             :config="{
@@ -4085,9 +4080,30 @@ defineExpose({ exportImage })
               closed: !openShapeTypes.has(toolStore.shapeType)
             }"
           />
+          <!-- Preview vertices -->
+          <v-circle
+            v-for="(point, index) in toolStore.tempPoints"
+            :key="`temp-${index}`"
+            :config="{
+              x: point.x,
+              y: point.y,
+              radius: 4,
+              fill: '#FF9800'
+            }"
+          />
+          <v-circle
+            v-if="toolStore.shapeType === 'polygon' && toolStore.tempPoints.length > 1"
+            :config="{
+              x: toolStore.tempPoints[0].x,
+              y: toolStore.tempPoints[0].y,
+              radius: 2,
+              fill: '#FFFFFF',
+              listening: false
+            }"
+          />
         </template>
 
-        <!-- ?꾩떆 媛?대뱶 ??-->
+        <!-- Temporary guides -->
         <template v-if="toolStore.mode === 'guide' && toolStore.tempPoints.length > 0">
           <v-circle
             v-for="(point, index) in toolStore.tempPoints"
@@ -4102,10 +4118,10 @@ defineExpose({ exportImage })
         </template>
       </v-layer>
 
-      <!-- 媛?대뱶 ?덉씠??-->
+      <!-- Guide layer -->
       <v-layer>
         <template v-for="guide in canvasStore.guides" :key="guide.id">
-          <!-- 湲몄씠 媛?대뱶 -->
+          <!-- Length guides -->
           <template v-if="guide.type === 'length' && guide.visible !== false && toolStore.showLength">
             <v-line
               @contextmenu="handleGuideContextMenu(guide.id, $event)"
@@ -4134,7 +4150,7 @@ defineExpose({ exportImage })
             />
           </template>
 
-          <!-- ?띿뒪??媛?대뱶 -->
+          <!-- Text guides -->
           <template v-if="guide.type === 'text' && guide.visible !== false && !guide.useLatex">
             <v-text
               @contextmenu="handleGuideContextMenu(guide.id, $event)"
@@ -4163,7 +4179,7 @@ defineExpose({ exportImage })
             />
           </template>
 
-          <!-- 媛곷룄 媛?대뱶 -->
+          <!-- Angle guides -->
           <template v-if="guide.type === 'angle' && guide.visible !== false && toolStore.showAngle">
             <template v-if="isRightAngleGuide(guide.points)">
               <v-line
@@ -4206,7 +4222,7 @@ defineExpose({ exportImage })
           </template>
         </template>
 
-        <!-- 湲몄씠 媛?대뱶 ?쒕옒洹?誘몃━蹂닿린 -->
+        <!-- Length guide drag preview -->
         <template v-if="lengthGuidePreview">
           <v-line
             :config="{

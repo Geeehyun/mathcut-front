@@ -135,6 +135,9 @@ const isHeightBaseConfigurable = computed(() => {
   if (!selectedShape.value) return false
   return selectedShape.value.type !== 'circle'
     && selectedShape.value.type !== 'triangle-right'
+    && selectedShape.value.type !== 'rectangle'
+    && selectedShape.value.type !== 'rect-rectangle'
+    && selectedShape.value.type !== 'rect-square'
     && !openShapeTypes.has(selectedShape.value.type)
     && selectedShape.value.points.length >= 3
 })
@@ -501,7 +504,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
         <button class="action-btn" :disabled="!hasSelection" @click="duplicateSelected">복제</button>
         <button class="action-btn danger" :disabled="!hasSelection" @click="deleteSelected">삭제</button>
       </div>
-      <p class="text-[11px] text-gray-500 mt-2">이동 잠금 해제 상태에서 `Space + 드래그`</p>
+      <p class="text-[11px] text-gray-500 mt-2">도형 선택·수정 | Space + 드래그로 화면 이동</p>
     </section>
 
     <section v-if="hasSelection" class="panel-section">
