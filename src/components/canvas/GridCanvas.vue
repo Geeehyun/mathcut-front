@@ -3527,7 +3527,7 @@ defineExpose({ exportImage })
               />
             </template>
             <v-circle
-              v-if="toolStore.mode === 'select' && canvasStore.selectedShapeId === shape.id"
+              v-if="false && toolStore.mode === 'select' && canvasStore.selectedShapeId === shape.id"
               v-for="(point, pIndex) in shape.points"
               :key="`${shape.id}-vertex-handle-${pIndex}`"
               @mousedown="handleVertexHandleMouseDown(shape.id, pIndex, $event)"
@@ -4027,7 +4027,7 @@ defineExpose({ exportImage })
               />
             </template>
             <v-circle
-              v-if="toolStore.mode === 'select' && canvasStore.selectedShapeId === shape.id"
+              v-if="false && toolStore.mode === 'select' && canvasStore.selectedShapeId === shape.id"
               v-for="(point, pIndex) in shape.points"
               :key="`${shape.id}-circle-vertex-handle-${pIndex}`"
               @mousedown="handleVertexHandleMouseDown(shape.id, pIndex, $event)"
@@ -4306,58 +4306,6 @@ defineExpose({ exportImage })
           </template>
         </template>
 
-        <!-- 선택 도형 변형 핸들: 비율 유지 스케일 + 자유 회전 -->
-        <template v-if="toolStore.mode === 'select' && canvasStore.selectedShapeId && selectedShapeTransformUI && !transformDrag">
-          <v-circle
-            :config="{
-              x: selectedShapeTransformUI.scaleHandle.x,
-              y: selectedShapeTransformUI.scaleHandle.y,
-              radius: 8,
-              fill: '#ffffff',
-              stroke: '#64748B',
-              strokeWidth: DEFAULT_GUIDE_LINE_PX,
-              shadowColor: 'transparent',
-              shadowBlur: 0,
-              shadowOpacity: 0
-            }"
-            @mousedown="handleScaleHandleMouseDown(canvasStore.selectedShapeId!, $event)"
-          />
-          <v-text
-            :config="{
-              x: selectedShapeTransformUI.scaleHandle.x - 4.5,
-              y: selectedShapeTransformUI.scaleHandle.y - 6,
-              text: '⤢',
-              fontSize: 11,
-              fill: '#475569',
-              listening: false
-            }"
-          />
-          <v-circle
-            :config="{
-              x: selectedShapeTransformUI.rotateHandle.x,
-              y: selectedShapeTransformUI.rotateHandle.y,
-              radius: 8,
-              fill: '#ffffff',
-              stroke: '#64748B',
-              strokeWidth: 2,
-              shadowColor: 'transparent',
-              shadowBlur: 0,
-              shadowOpacity: 0
-            }"
-            @mousedown="handleRotateHandleMouseDown(canvasStore.selectedShapeId!, $event)"
-          />
-          <v-text
-            :config="{
-              x: selectedShapeTransformUI.rotateHandle.x - 4.5,
-              y: selectedShapeTransformUI.rotateHandle.y - 6,
-              text: '⟳',
-              fontSize: 11,
-              fill: '#475569',
-              listening: false
-            }"
-          />
-        </template>
-
         <!-- Shape preview while drawing -->
         <template v-if="toolStore.mode === 'shape' && toolStore.tempPoints.length > 0">
           <!-- Preview polyline -->
@@ -4617,6 +4565,83 @@ defineExpose({ exportImage })
               stroke: LENGTH_GUIDE_DEFAULT_COLOR,
               strokeWidth: 2,
               dash: [5, 5]
+            }"
+          />
+        </template>
+      </v-layer>
+
+      <!-- Interaction handle layer (always above guides/shapes) -->
+      <v-layer>
+        <template v-if="toolStore.mode === 'select' && canvasStore.selectedShapeId && canvasStore.selectedShape">
+          <v-circle
+            v-for="(point, pIndex) in canvasStore.selectedShape.points"
+            :key="`${canvasStore.selectedShapeId}-overlay-vertex-handle-${pIndex}`"
+            @mousedown="handleVertexHandleMouseDown(canvasStore.selectedShapeId, pIndex, $event)"
+            @click="handleVertexHandleClick(canvasStore.selectedShapeId, $event)"
+            @mouseenter="handleVertexMouseEnter(canvasStore.selectedShapeId, pIndex)"
+            @mouseleave="handleVertexMouseLeave"
+            :config="{
+              x: point.x,
+              y: point.y,
+              radius: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? 7 : 6,
+              fill: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? '#DBEAFE' : '#ffffff',
+              stroke: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? '#1D4ED8' : '#2563EB',
+              strokeWidth: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? 2.5 : 2,
+              shadowColor: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? '#60A5FA' : 'transparent',
+              shadowBlur: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? 10 : 0,
+              shadowOpacity: isVertexHovered(canvasStore.selectedShapeId, pIndex) ? 0.45 : 0,
+              hitStrokeWidth: 14
+            }"
+          />
+        </template>
+
+        <template v-if="toolStore.mode === 'select' && canvasStore.selectedShapeId && selectedShapeTransformUI && !transformDrag">
+          <v-circle
+            :config="{
+              x: selectedShapeTransformUI.scaleHandle.x,
+              y: selectedShapeTransformUI.scaleHandle.y,
+              radius: 8,
+              fill: '#ffffff',
+              stroke: '#64748B',
+              strokeWidth: DEFAULT_GUIDE_LINE_PX,
+              shadowColor: 'transparent',
+              shadowBlur: 0,
+              shadowOpacity: 0
+            }"
+            @mousedown="handleScaleHandleMouseDown(canvasStore.selectedShapeId!, $event)"
+          />
+          <v-text
+            :config="{
+              x: selectedShapeTransformUI.scaleHandle.x - 4.5,
+              y: selectedShapeTransformUI.scaleHandle.y - 6,
+              text: '⤢',
+              fontSize: 11,
+              fill: '#475569',
+              listening: false
+            }"
+          />
+          <v-circle
+            :config="{
+              x: selectedShapeTransformUI.rotateHandle.x,
+              y: selectedShapeTransformUI.rotateHandle.y,
+              radius: 8,
+              fill: '#ffffff',
+              stroke: '#64748B',
+              strokeWidth: 2,
+              shadowColor: 'transparent',
+              shadowBlur: 0,
+              shadowOpacity: 0
+            }"
+            @mousedown="handleRotateHandleMouseDown(canvasStore.selectedShapeId!, $event)"
+          />
+          <v-text
+            :config="{
+              x: selectedShapeTransformUI.rotateHandle.x - 4.5,
+              y: selectedShapeTransformUI.rotateHandle.y - 6,
+              text: '⟳',
+              fontSize: 11,
+              fill: '#475569',
+              listening: false
             }"
           />
         </template>
