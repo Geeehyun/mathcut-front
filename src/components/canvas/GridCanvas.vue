@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watchEffect } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue'
 import { useToolStore } from '@/stores/tool'
 import { useCanvasStore } from '@/stores/canvas'
 import { useShape } from '@/composables/useShape'
@@ -188,6 +188,21 @@ const guideTextDrag = ref<{
   startRaw: { x: number, y: number }
   startOffset: { x: number, y: number }
 } | null>(null)
+const selectedTextGuideId = ref<string | null>(null)
+const hoveredTextGuideId = ref<string | null>(null)
+const textGuideDrag = ref<{
+  guideId: string
+  lastPoint: Point
+} | null>(null)
+const textGuideTransformDrag = ref<{
+  guideId: string
+  type: 'scale' | 'rotate'
+  center: { x: number, y: number }
+  startDistance?: number
+  startAngle?: number
+  originalFontSize: number
+  originalRotation: number
+} | null>(null)
 const hoveredVertex = ref(false)
 const hoveredVertexKey = ref<string | null>(null)
 const hoveredGuideTextKey = ref<string | null>(null)
@@ -210,6 +225,23 @@ const pointLabelValue = ref('')
 const pointLabelUseLatex = ref(false)
 const pointLabelInputRef = ref<HTMLInputElement | null>(null)
 const pointLabelPanelRef = ref<HTMLElement | null>(null)
+const textGuideEditState = ref<{
+  guideId: string
+  rawX: number
+  rawY: number
+} | null>(null)
+const textGuideValue = ref('')
+const textGuideUseLatex = ref(false)
+const textGuideInputRef = ref<HTMLInputElement | null>(null)
+const textGuidePanelRef = ref<HTMLElement | null>(null)
+
+watch(
+  () => canvasStore.selectedGuide,
+  (guide) => {
+    selectedTextGuideId.value = guide?.type === 'text' ? guide.id : null
+  },
+  { immediate: true }
+)
 // Set cursor style directly on Konva container DOM.
 watchEffect(() => {
   const stage = stageRef.value?.getNode?.()
@@ -346,6 +378,7 @@ function handleClick(e: KonvaEventObject<MouseEvent>) {
 
   if (toolStore.mode === 'select') {
     canvasStore.selectShape(null)
+    selectedTextGuideId.value = null
   } else if (toolStore.mode === 'shape') {
     handleShapeClick(point)
   } else {
@@ -408,6 +441,9 @@ function handleMouseLeave() {
   vertexDrag.value = null
   transformDrag.value = null
   guideTextDrag.value = null
+  textGuideDrag.value = null
+  textGuideTransformDrag.value = null
+  hoveredTextGuideId.value = null
   hoveredGuideTextKey.value = null
   hoveredGuideTextKey.value = null
   if (toolStore.mode !== 'guide' || toolStore.guideType !== 'text') {
@@ -422,6 +458,9 @@ function handleMouseMove(e: KonvaEventObject<MouseEvent>) {
     vertexDrag.value = null
     transformDrag.value = null
     guideTextDrag.value = null
+    textGuideDrag.value = null
+    textGuideTransformDrag.value = null
+    hoveredTextGuideId.value = null
     hoveredGuideTextKey.value = null
     return
   }
@@ -456,6 +495,49 @@ function handleMouseMove(e: KonvaEventObject<MouseEvent>) {
       { offsetX: nextOffsetX, offsetY: nextOffsetY },
       false
     )
+    return
+  }
+
+  if (toolStore.mode === 'select' && textGuideTransformDrag.value) {
+    const drag = textGuideTransformDrag.value
+    const guide = canvasStore.guides.find((g) => g.id === drag.guideId)
+    if (!guide || guide.type !== 'text') {
+      textGuideTransformDrag.value = null
+      return
+    }
+    if (drag.type === 'scale') {
+      const currentDistance = Math.max(1, Math.hypot(pos.x - drag.center.x, pos.y - drag.center.y))
+      const ratio = Math.max(0.1, Math.min(10, currentDistance / Math.max(1, drag.startDistance || 1)))
+      const nextFontSize = Math.max(8, Math.min(72, drag.originalFontSize * ratio))
+      canvasStore.updateGuide(drag.guideId, (target) => ({ ...target, fontSize: nextFontSize }), false)
+      return
+    }
+    const currentAngle = Math.atan2(pos.y - drag.center.y, pos.x - drag.center.x)
+    const delta = currentAngle - (drag.startAngle || 0)
+    const nextRotation = drag.originalRotation + (delta * 180 / Math.PI)
+    canvasStore.updateGuide(drag.guideId, (target) => ({ ...target, rotation: nextRotation }), false)
+    return
+  }
+
+  if (toolStore.mode === 'select' && textGuideDrag.value) {
+    const snapped = snapToGrid(pos.x, pos.y)
+    const dx = snapped.x - textGuideDrag.value.lastPoint.x
+    const dy = snapped.y - textGuideDrag.value.lastPoint.y
+    if (dx !== 0 || dy !== 0) {
+      canvasStore.updateGuide(textGuideDrag.value.guideId, (guide) => ({
+        ...guide,
+        points: guide.points.map((p, index) => index === 0
+          ? {
+              x: p.x + dx,
+              y: p.y + dy,
+              gridX: (p.x + dx) / GRID_CONFIG.size,
+              gridY: (p.y + dy) / GRID_CONFIG.size
+            }
+          : p
+        )
+      }), false)
+      textGuideDrag.value.lastPoint = snapped
+    }
     return
   }
 
@@ -535,6 +617,8 @@ function handleMouseUp(e: KonvaEventObject<MouseEvent>) {
     vertexDrag.value = null
     transformDrag.value = null
     guideTextDrag.value = null
+    textGuideDrag.value = null
+    textGuideTransformDrag.value = null
     hoveredGuideTextKey.value = null
     return
   }
@@ -549,6 +633,14 @@ function handleMouseUp(e: KonvaEventObject<MouseEvent>) {
       logAngleGuidePlacement(drag.shapeId, drag.itemIndex)
     }
     guideTextDrag.value = null
+    return
+  }
+  if (toolStore.mode === 'select' && textGuideTransformDrag.value) {
+    textGuideTransformDrag.value = null
+    return
+  }
+  if (toolStore.mode === 'select' && textGuideDrag.value) {
+    textGuideDrag.value = null
     return
   }
   if (toolStore.mode === 'select' && transformDrag.value) {
@@ -575,6 +667,7 @@ function handleShapeNodeClick(id: string, e: KonvaEventObject<MouseEvent>) {
   if (props.interactionLocked) return
   if (toolStore.mode === 'select' && toolStore.zoom > 100 && isSpacePressed.value) return
   if (toolStore.mode !== 'select') return
+  selectedTextGuideId.value = null
   canvasStore.selectShape(id)
   suppressCanvasClick.value = true
   e.cancelBubble = true
@@ -592,6 +685,7 @@ function handleShapeNodeMouseDown(id: string, e: KonvaEventObject<MouseEvent>) {
   const snapped = snapToGrid(pos.x, pos.y)
   // 드래그 시작 시 히스토리 1회 저장
   canvasStore.saveHistory()
+  selectedTextGuideId.value = null
   canvasStore.selectShape(id)
   shapeDrag.value = {
     id,
@@ -601,12 +695,109 @@ function handleShapeNodeMouseDown(id: string, e: KonvaEventObject<MouseEvent>) {
   e.cancelBubble = true
 }
 
+function getTextGuideAnchor(guide: { points: Point[] }): { x: number, y: number } {
+  const p = guide.points[0]
+  return {
+    x: p?.x ?? 0,
+    y: (p?.y ?? 0) - 20
+  }
+}
+
+function getTextGuideFontSize(guide: { fontSize?: number }): number {
+  return guide.fontSize || DEFAULT_TEXT_FONT_SIZE
+}
+
+function getTextGuideRotation(guide: { rotation?: number }): number {
+  return Number.isFinite(guide.rotation) ? Number(guide.rotation) : 0
+}
+
+function isTextGuideHighlighted(guideId: string): boolean {
+  return hoveredTextGuideId.value === guideId || selectedTextGuideId.value === guideId
+}
+
+function handleTextGuideMouseEnter(guideId: string) {
+  if (toolStore.mode !== 'select') return
+  hoveredTextGuideId.value = guideId
+}
+
+function handleTextGuideMouseLeave(guideId: string) {
+  if (hoveredTextGuideId.value === guideId) {
+    hoveredTextGuideId.value = null
+  }
+}
+
+function handleTextGuideClick(guideId: string, e: KonvaEventObject<MouseEvent>) {
+  if (props.interactionLocked) return
+  if (toolStore.mode !== 'select') return
+  canvasStore.selectGuide(guideId)
+  selectedTextGuideId.value = guideId
+  suppressCanvasClick.value = true
+  e.cancelBubble = true
+}
+
+function handleTextGuideMouseDown(guideId: string, e: KonvaEventObject<MouseEvent>) {
+  if (props.interactionLocked) return
+  if (shouldStartPanGesture(e.evt)) return
+  if (e.evt.button !== 0) return
+  if (toolStore.mode !== 'select') return
+  const stage = e.target.getStage()
+  if (!stage) return
+  const pos = stage.getPointerPosition()
+  if (!pos) return
+  const snapped = snapToGrid(pos.x, pos.y)
+  canvasStore.saveHistory()
+  canvasStore.selectGuide(guideId)
+  selectedTextGuideId.value = guideId
+  textGuideDrag.value = {
+    guideId,
+    lastPoint: snapped
+  }
+  suppressCanvasClick.value = true
+  e.cancelBubble = true
+}
+
+function handleTextGuideDblClick(guideId: string, e: KonvaEventObject<MouseEvent>) {
+  e.cancelBubble = true
+  startTextGuideEdit(guideId)
+}
+
+function handleTextGuideOverlayMouseDown(guideId: string, e: MouseEvent) {
+  if (props.interactionLocked) return
+  if (shouldStartPanGesture(e)) return
+  if (e.button !== 0) return
+  if (toolStore.mode !== 'select') return
+  const stage = stageRef.value?.getNode?.()
+  if (!stage) return
+  stage.setPointersPositions(e as any)
+  const pos = stage.getPointerPosition()
+  if (!pos) return
+  const snapped = snapToGrid(pos.x, pos.y)
+  canvasStore.saveHistory()
+  canvasStore.selectGuide(guideId)
+  selectedTextGuideId.value = guideId
+  textGuideDrag.value = {
+    guideId,
+    lastPoint: snapped
+  }
+}
+
+function handleTextGuideOverlayContextMenu(guideId: string, e: MouseEvent) {
+  e.preventDefault()
+  suppressNativeContextMenu.value = true
+  emit('contextmenu', {
+    x: e.clientX,
+    y: e.clientY,
+    target: { kind: 'guide', guideId }
+  })
+}
+
 function handleVertexHandleMouseDown(shapeId: string, pointIndex: number, e: KonvaEventObject<MouseEvent>) {
   if (props.interactionLocked) return
   if (shouldStartPanGesture(e.evt)) return
   if (toolStore.mode !== 'select') return
   if (e.evt.button !== 0) return
   canvasStore.saveHistory()
+  selectedTextGuideId.value = null
   canvasStore.selectShape(shapeId)
   shapeDrag.value = null
   vertexDrag.value = { shapeId, pointIndex }
@@ -705,6 +896,7 @@ function handleScaleHandleMouseDown(shapeId: string, e: KonvaEventObject<MouseEv
   const center = getShapeCentroid(shape.points)
   const startDistance = Math.max(1, Math.hypot(pos.x - center.x, pos.y - center.y))
   canvasStore.saveHistory()
+  selectedTextGuideId.value = null
   canvasStore.selectShape(shapeId)
   shapeDrag.value = null
   vertexDrag.value = null
@@ -714,6 +906,35 @@ function handleScaleHandleMouseDown(shapeId: string, e: KonvaEventObject<MouseEv
     center,
     startDistance,
     originalPoints: shape.points.map((p) => ({ ...p }))
+  }
+  suppressCanvasClick.value = true
+  e.cancelBubble = true
+}
+
+function handleTextGuideScaleHandleMouseDown(guideId: string, e: KonvaEventObject<MouseEvent>) {
+  if (props.interactionLocked) return
+  if (shouldStartPanGesture(e.evt)) return
+  if (toolStore.mode !== 'select') return
+  if (e.evt.button !== 0) return
+  const stage = e.target.getStage()
+  if (!stage) return
+  const pos = stage.getPointerPosition()
+  if (!pos) return
+  const guide = canvasStore.guides.find((g) => g.id === guideId)
+  if (!guide || guide.type !== 'text') return
+  const center = getTextGuideAnchor(guide)
+  const startDistance = Math.max(1, Math.hypot(pos.x - center.x, pos.y - center.y))
+  canvasStore.saveHistory()
+  canvasStore.selectGuide(guideId)
+  selectedTextGuideId.value = guideId
+  textGuideDrag.value = null
+  textGuideTransformDrag.value = {
+    guideId,
+    type: 'scale',
+    center,
+    startDistance,
+    originalFontSize: getTextGuideFontSize(guide),
+    originalRotation: getTextGuideRotation(guide)
   }
   suppressCanvasClick.value = true
   e.cancelBubble = true
@@ -807,6 +1028,35 @@ function handleRotateHandleMouseDown(shapeId: string, e: KonvaEventObject<MouseE
   e.cancelBubble = true
 }
 
+function handleTextGuideRotateHandleMouseDown(guideId: string, e: KonvaEventObject<MouseEvent>) {
+  if (props.interactionLocked) return
+  if (shouldStartPanGesture(e.evt)) return
+  if (toolStore.mode !== 'select') return
+  if (e.evt.button !== 0) return
+  const stage = e.target.getStage()
+  if (!stage) return
+  const pos = stage.getPointerPosition()
+  if (!pos) return
+  const guide = canvasStore.guides.find((g) => g.id === guideId)
+  if (!guide || guide.type !== 'text') return
+  const center = getTextGuideAnchor(guide)
+  const startAngle = Math.atan2(pos.y - center.y, pos.x - center.x)
+  canvasStore.saveHistory()
+  canvasStore.selectGuide(guideId)
+  selectedTextGuideId.value = guideId
+  textGuideDrag.value = null
+  textGuideTransformDrag.value = {
+    guideId,
+    type: 'rotate',
+    center,
+    startAngle,
+    originalFontSize: getTextGuideFontSize(guide),
+    originalRotation: getTextGuideRotation(guide)
+  }
+  suppressCanvasClick.value = true
+  e.cancelBubble = true
+}
+
 function handleShapeNodeMouseEnter(id: string) {
   hoveredShapeId.value = id
 }
@@ -821,6 +1071,13 @@ function handleGuideContextMenu(guideId: string, e: KonvaEventObject<PointerEven
   e.evt.preventDefault()
   e.cancelBubble = true
   suppressNativeContextMenu.value = true
+  const guide = canvasStore.guides.find((g) => g.id === guideId)
+  if (guide) {
+    canvasStore.selectGuide(guideId)
+    if (guide.type === 'text') {
+      selectedTextGuideId.value = guideId
+    }
+  }
   emit('contextmenu', {
     x: e.evt.clientX,
     y: e.evt.clientY,
@@ -883,10 +1140,8 @@ function findGuideIdFromRawPoint(raw: { x: number, y: number }): string | null {
       const labelPos = getLengthGuideLabelPos(guide)
       d = Math.min(d, distPoint(labelPos.x, labelPos.y - 16))
     } else if (guide.type === 'text') {
-      d = Math.min(
-        distPoint(guide.points[0].x, guide.points[0].y),
-        distPoint(guide.points[0].x, guide.points[0].y - 20)
-      )
+      const anchor = getTextGuideAnchor(guide)
+      d = distPoint(anchor.x, anchor.y)
     } else if (guide.type === 'angle' && toolStore.showAngle) {
       if (isRightAngleGuide(guide.points)) {
         const marker = getRightAngleGuideMarkerPoints(guide.points[0], guide.points[1], guide.points[2], GUIDE_RIGHT_ANGLE_MARKER_SIZE)
@@ -931,11 +1186,14 @@ function handleNativeContextMenu(e: MouseEvent) {
     canvasStore.selectShape(null)
     cancelTextInput()
     cancelPointLabelEdit()
+    cancelTextGuideEdit()
   }
   shapeDrag.value = null
   vertexDrag.value = null
   transformDrag.value = null
   guideTextDrag.value = null
+  textGuideDrag.value = null
+  textGuideTransformDrag.value = null
 
   const stage = stageRef.value?.getNode?.()
   let target: { kind: 'guide', guideId: string } | { kind: 'shape', shapeId: string } | null = null
@@ -967,6 +1225,15 @@ function handleNativeContextMenu(e: MouseEvent) {
     y: e.clientY,
     target
   })
+  if (target?.kind === 'guide') {
+    const guide = canvasStore.guides.find((g) => g.id === target.guideId)
+    if (guide) {
+      canvasStore.selectGuide(guide.id)
+      if (guide.type === 'text') {
+        selectedTextGuideId.value = guide.id
+      }
+    }
+  }
 }
 
 // Guide node name for native context-menu fallback hit testing
@@ -2705,6 +2972,21 @@ const selectedShapeTransformUI = computed(() => {
   }
 })
 
+const selectedTextGuideTransformUI = computed(() => {
+  if (toolStore.mode !== 'select') return null
+  if (!selectedTextGuideId.value) return null
+  const guide = canvasStore.guides.find((g) => g.id === selectedTextGuideId.value)
+  if (!guide || guide.type !== 'text' || guide.visible === false) return null
+  const center = getTextGuideAnchor(guide)
+  const handleDistance = 22
+  const diagonalOffset = handleDistance / Math.sqrt(2)
+  return {
+    center,
+    rotateHandle: { x: center.x, y: center.y - handleDistance },
+    scaleHandle: { x: center.x + diagonalOffset, y: center.y + diagonalOffset }
+  }
+})
+
 function getPreviewPoints(): Point[] {
   if (!mousePos.value) return []
   const points = [...toolStore.tempPoints, mousePos.value]
@@ -2754,6 +3036,43 @@ function cancelTextInput() {
   textInputState.value = null
   textInputValue.value = ''
   textInputUseLatex.value = false
+}
+
+function startTextGuideEdit(guideId: string) {
+  const guide = canvasStore.guides.find((g) => g.id === guideId)
+  if (!guide || guide.type !== 'text') return
+  const anchor = getTextGuideAnchor(guide)
+  textGuideEditState.value = {
+    guideId,
+    rawX: anchor.x + 6,
+    rawY: anchor.y + 6
+  }
+  textGuideValue.value = guide.text || 'A'
+  textGuideUseLatex.value = !!guide.useLatex
+  requestAnimationFrame(() => {
+    textGuideInputRef.value?.focus()
+    textGuideInputRef.value?.select()
+  })
+}
+
+function confirmTextGuideEdit() {
+  const state = textGuideEditState.value
+  if (!state) return
+  const value = textGuideValue.value.trim()
+  canvasStore.updateGuide(state.guideId, (guide) => ({
+    ...guide,
+    text: value || 'A',
+    useLatex: textGuideUseLatex.value
+  }))
+  textGuideEditState.value = null
+  textGuideValue.value = ''
+  textGuideUseLatex.value = false
+}
+
+function cancelTextGuideEdit() {
+  textGuideEditState.value = null
+  textGuideValue.value = ''
+  textGuideUseLatex.value = false
 }
 
 function startPointLabelEdit(shape: Shape, pointIndex: number) {
@@ -2809,6 +3128,12 @@ function handlePointLabelInputBlur(e: FocusEvent) {
   const next = e.relatedTarget as Node | null
   if (next && pointLabelPanelRef.value?.contains(next)) return
   confirmPointLabelEdit()
+}
+
+function handleTextGuideInputBlur(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && textGuidePanelRef.value?.contains(next)) return
+  confirmTextGuideEdit()
 }
 
 function handlePointLabelDblClick(shape: Shape, pointIndex: number, e: KonvaEventObject<MouseEvent>) {
@@ -2897,16 +3222,28 @@ const latexPointLabelOverlays = computed(() => {
 })
 
 const latexTextGuideOverlays = computed(() => {
-  const overlays: Array<{ key: string, x: number, y: number, html: string }> = []
+  const overlays: Array<{
+    key: string
+    x: number
+    y: number
+    html: string
+    guideId: string
+    color: string
+    fontSize: number
+    rotation: number
+  }> = []
   for (const guide of canvasStore.guides) {
     if (guide.type !== 'text' || guide.visible === false || !guide.useLatex) continue
-    const p = guide.points[0]
-    if (!p) continue
+    const anchor = getTextGuideAnchor(guide)
     overlays.push({
       key: guide.id,
-      x: p.x,
-      y: p.y - 20,
-      html: renderLatexHtml(guide.text || '')
+      x: anchor.x,
+      y: anchor.y,
+      html: renderLatexHtml(guide.text || ''),
+      guideId: guide.id,
+      color: guide.color || DEFAULT_TEXT_COLOR,
+      fontSize: getTextGuideFontSize(guide),
+      rotation: getTextGuideRotation(guide)
     })
   }
   return overlays
@@ -4102,6 +4439,52 @@ defineExpose({ exportImage })
             }"
           />
         </template>
+        <template
+          v-if="toolStore.mode === 'select' && selectedTextGuideId && selectedTextGuideTransformUI && !textGuideTransformDrag"
+        >
+          <v-circle
+            :config="{
+              x: selectedTextGuideTransformUI.scaleHandle.x,
+              y: selectedTextGuideTransformUI.scaleHandle.y,
+              radius: 8,
+              fill: '#ffffff',
+              stroke: '#64748B',
+              strokeWidth: DEFAULT_GUIDE_LINE_PX
+            }"
+            @mousedown="handleTextGuideScaleHandleMouseDown(selectedTextGuideId, $event)"
+          />
+          <v-text
+            :config="{
+              x: selectedTextGuideTransformUI.scaleHandle.x - 4.5,
+              y: selectedTextGuideTransformUI.scaleHandle.y - 6,
+              text: '⤢',
+              fontSize: 11,
+              fill: '#475569',
+              listening: false
+            }"
+          />
+          <v-circle
+            :config="{
+              x: selectedTextGuideTransformUI.rotateHandle.x,
+              y: selectedTextGuideTransformUI.rotateHandle.y,
+              radius: 8,
+              fill: '#ffffff',
+              stroke: '#64748B',
+              strokeWidth: DEFAULT_GUIDE_LINE_PX
+            }"
+            @mousedown="handleTextGuideRotateHandleMouseDown(selectedTextGuideId, $event)"
+          />
+          <v-text
+            :config="{
+              x: selectedTextGuideTransformUI.rotateHandle.x - 4.5,
+              y: selectedTextGuideTransformUI.rotateHandle.y - 6,
+              text: '⟳',
+              fontSize: 11,
+              fill: '#475569',
+              listening: false
+            }"
+          />
+        </template>
 
         <!-- Temporary guides -->
         <template v-if="toolStore.mode === 'guide' && toolStore.tempPoints.length > 0">
@@ -4153,28 +4536,28 @@ defineExpose({ exportImage })
           <!-- Text guides -->
           <template v-if="guide.type === 'text' && guide.visible !== false && !guide.useLatex">
             <v-text
+              @click="handleTextGuideClick(guide.id, $event)"
+              @mousedown="handleTextGuideMouseDown(guide.id, $event)"
+              @mouseenter="handleTextGuideMouseEnter(guide.id)"
+              @mouseleave="handleTextGuideMouseLeave(guide.id)"
+              @dblclick="handleTextGuideDblClick(guide.id, $event)"
               @contextmenu="handleGuideContextMenu(guide.id, $event)"
               :config="{
                 name: getGuideNodeName(guide.id),
-                x: guide.points[0].x,
-                y: guide.points[0].y - 20,
+                x: getTextGuideAnchor(guide).x,
+                y: getTextGuideAnchor(guide).y,
                 text: formatMathText(guide.text || 'A'),
-                fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
+                fontSize: getTextGuideFontSize(guide),
                 fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: guide.color || '#FF9800',
+                fill: guide.color || DEFAULT_TEXT_COLOR,
                 fontStyle: 'bold',
                 align: 'center',
-                offsetX: 5
-              }"
-            />
-            <v-circle
-              @contextmenu="handleGuideContextMenu(guide.id, $event)"
-              :config="{
-                name: getGuideNodeName(guide.id),
-                x: guide.points[0].x,
-                y: guide.points[0].y,
-                radius: 3,
-                fill: guide.color || '#FF9800'
+                rotation: getTextGuideRotation(guide),
+                offsetX: getTextWidthPx(formatMathText(guide.text || 'A'), getTextGuideFontSize(guide)) * 0.5,
+                offsetY: getTextGuideFontSize(guide) * 0.45,
+                shadowColor: isTextGuideHighlighted(guide.id) ? '#38BDF8' : 'transparent',
+                shadowBlur: isTextGuideHighlighted(guide.id) ? 10 : 0,
+                shadowOpacity: isTextGuideHighlighted(guide.id) ? 0.7 : 0
               }"
             />
           </template>
@@ -4243,9 +4626,23 @@ defineExpose({ exportImage })
         <div
           v-for="overlay in latexTextGuideOverlays"
           :key="`latex-guide-${overlay.key}`"
-          class="absolute text-[#FF9800] text-sm"
-          :style="{ left: `${overlay.x}px`, top: `${overlay.y}px`, fontFamily: DEFAULT_TEXT_FONT_FAMILY }"
+          class="absolute pointer-events-auto rounded-sm"
+          :class="isTextGuideHighlighted(overlay.guideId) ? 'bg-sky-100/70 ring-1 ring-sky-300' : ''"
+          :style="{
+            left: `${overlay.x}px`,
+            top: `${overlay.y}px`,
+            color: overlay.color,
+            fontSize: `${overlay.fontSize}px`,
+            fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+            transform: `translate(-50%, -45%) rotate(${overlay.rotation}deg)`,
+            transformOrigin: 'center center'
+          }"
           v-html="overlay.html"
+          @mouseenter="handleTextGuideMouseEnter(overlay.guideId)"
+          @mouseleave="handleTextGuideMouseLeave(overlay.guideId)"
+          @mousedown.stop.prevent="handleTextGuideOverlayMouseDown(overlay.guideId, $event)"
+          @dblclick.stop="startTextGuideEdit(overlay.guideId)"
+          @contextmenu.stop.prevent="handleTextGuideOverlayContextMenu(overlay.guideId, $event)"
         ></div>
         <div
           v-for="overlay in latexPointLabelOverlays"
@@ -4316,6 +4713,34 @@ defineExpose({ exportImage })
       <div v-if="pointLabelUseLatex && pointLabelValue.trim()" class="mt-1 text-[11px] text-gray-600">
         <span>미리보기:</span>
         <div class="mt-1 p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="renderLatexHtml(pointLabelValue)"></div>
+      </div>
+    </div>
+    <div
+      v-if="textGuideEditState"
+      ref="textGuidePanelRef"
+      class="absolute z-20 bg-white/95 border border-orange-300 rounded-lg px-2 py-2 shadow max-w-[360px] min-w-[220px]"
+      :style="{
+        left: `${textGuideEditState.rawX * zoomScale + viewportOffset.x}px`,
+        top: `${textGuideEditState.rawY * zoomScale + viewportOffset.y}px`
+      }"
+    >
+      <input
+        ref="textGuideInputRef"
+        v-model="textGuideValue"
+        type="text"
+        class="w-full border border-orange-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-orange-500"
+        placeholder="텍스트"
+        @keydown.enter.prevent="confirmTextGuideEdit"
+        @keydown.esc.prevent="cancelTextGuideEdit"
+        @blur="handleTextGuideInputBlur"
+      />
+      <label class="mt-2 flex items-center gap-1.5 text-xs text-gray-700">
+        <input v-model="textGuideUseLatex" type="checkbox" tabindex="0">
+        <span>LaTeX 사용</span>
+      </label>
+      <div v-if="textGuideUseLatex && textGuideValue.trim()" class="mt-1 text-[11px] text-gray-600">
+        <span>미리보기:</span>
+        <div class="mt-1 p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="renderLatexHtml(textGuideValue)"></div>
       </div>
     </div>
   </div>

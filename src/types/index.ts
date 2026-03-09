@@ -103,6 +103,7 @@ export interface Guide {
   color?: string
   fontSize?: number
   lineWidth?: number
+  rotation?: number
 }
 
 export type ModeType = 'shape' | 'guide' | 'select'

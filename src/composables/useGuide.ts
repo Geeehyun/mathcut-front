@@ -103,7 +103,8 @@ export function useGuide() {
       type: 'text',
       points: [point],
       text: customText || 'A',
-      useLatex
+      useLatex,
+      color: '#231815'
     }
     canvasStore.addGuide(guide)
   }

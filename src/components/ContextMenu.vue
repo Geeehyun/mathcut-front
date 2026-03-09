@@ -838,7 +838,7 @@ onUnmounted(() => {
               <button class="px-2 py-0.5 border rounded" @click="guideFontSizeDraft = Math.min(72, guideFontSizeDraft + 1); setGuideFontSize(guideFontSizeDraft)">+</button>
             </div>
           </div>
-          <div>
+          <div v-if="targetGuide?.type !== 'text'">
             <p class="text-xs text-gray-500 mb-1">선 굵기</p>
             <div class="flex items-center gap-1">
               <button class="px-2 py-0.5 border rounded" @click="guideLineWidthDraft = Number(Math.max(GUIDE_LINE_WIDTH_MIN, guideLineWidthDraft - GUIDE_LINE_WIDTH_STEP).toFixed(1)); setGuideLineWidth(guideLineWidthDraft)">-</button>

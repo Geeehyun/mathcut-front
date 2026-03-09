@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 import { useToolStore } from '@/stores/tool'
-import { GRID_CONFIG, STYLE_COLORS, type Point, type Shape } from '@/types'
+import { GRID_CONFIG, STYLE_COLORS, type Guide, type Point, type Shape } from '@/types'
 import { generateId, calculateDistance } from '@/utils/geometry'
 import { FILL_NONE, FILL_PALETTE, STROKE_PALETTE, cmykTooltip } from '@/constants/colorPalette'
 
@@ -49,7 +49,16 @@ function getPointLabel(index: number): string {
   return pointLabels[index] ?? `점${index + 1}`
 }
 const selectedShape = computed(() => canvasStore.selectedShape)
-const hasSelection = computed(() => !!selectedShape.value)
+const selectedGuide = computed(() => canvasStore.selectedGuide)
+const hasShapeSelection = computed(() => !!selectedShape.value)
+const hasGuideSelection = computed(() => !!selectedGuide.value)
+const selectedTextGuide = computed<Guide | null>(() => {
+  const guide = selectedGuide.value
+  if (!guide || guide.type !== 'text') return null
+  return guide
+})
+const hasTextGuideSelection = computed(() => !!selectedTextGuide.value)
+const hasSelection = computed(() => hasShapeSelection.value || hasGuideSelection.value)
 const isStandalonePointSelection = computed(() => selectedShape.value?.type === 'point' || selectedShape.value?.type === 'point-on-object')
 const isArrowSelection = computed(() => selectedShape.value?.type === 'arrow' || selectedShape.value?.type === 'arrow-curve')
 const isLineSelection = computed(() => {
@@ -83,6 +92,12 @@ function getShapePointLabel(shape: Shape, pointIndex: number): string {
 const selectedShapeTypeLabel = computed(() => {
   if (!selectedShape.value) return ''
   return shapeTypeNames[selectedShape.value.type] ?? selectedShape.value.type
+})
+const selectedGuideTypeLabel = computed(() => {
+  if (!selectedGuide.value) return ''
+  if (selectedGuide.value.type === 'text') return '텍스트 가이드'
+  if (selectedGuide.value.type === 'length') return '길이 가이드'
+  return '각도 가이드'
 })
 
 const selectedPointSummary = computed(() => {
@@ -234,6 +249,12 @@ const selectedPointVisible = computed(() => {
   if (!selectedShape.value) return false
   return getShapeGuideVisibleValue(selectedShape.value, 'point')
 })
+const selectedGuideColor = computed(() => selectedGuide.value?.color ?? '#231815')
+const selectedGuideFontSize = computed(() => Math.max(8, Math.min(72, Number(selectedGuide.value?.fontSize ?? 11))))
+const selectedGuideLineWidth = computed(() => {
+  const raw = Number(selectedGuide.value?.lineWidth ?? 0.4)
+  return Number(Math.max(0.1, Math.min(12, raw)).toFixed(1))
+})
 
 const selectedCircleMeasureMode = computed(() => {
   if (!selectedShape.value || selectedShape.value.type !== 'circle') return 'radius'
@@ -368,8 +389,14 @@ function duplicateSelected() {
 }
 
 function deleteSelected() {
-  if (!selectedShape.value) return
-  canvasStore.removeShape(selectedShape.value.id)
+  if (selectedShape.value) {
+    canvasStore.removeShape(selectedShape.value.id)
+    return
+  }
+  if (selectedGuide.value) {
+    canvasStore.removeGuide(selectedGuide.value.id)
+    canvasStore.selectGuide(null)
+  }
 }
 
 function flip(axis: 'horizontal' | 'vertical') {
@@ -432,6 +459,32 @@ function setPointColor(point: string) {
   })
 }
 
+function setSelectedGuideColor(color: string) {
+  if (!selectedGuide.value) return
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    color
+  }))
+}
+
+function setSelectedGuideFontSize(fontSize: number) {
+  if (!selectedGuide.value) return
+  const clamped = Math.max(8, Math.min(72, Math.round(fontSize)))
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    fontSize: clamped
+  }))
+}
+
+function setSelectedGuideLineWidth(lineWidth: number) {
+  if (!selectedGuide.value || selectedGuide.value.type === 'text') return
+  const clamped = Number(Math.max(0.1, Math.min(12, lineWidth)).toFixed(1))
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    lineWidth: clamped
+  }))
+}
+
 function setGridLineColor(color: string) {
   toolStore.setGridLineColor(color)
 }
@@ -475,11 +528,11 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
     <div class="pb-2 border-b border-gray-200">
       <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">속성 패널</h3>
       <p class="text-xs text-gray-400 mt-1">
-        {{ hasSelection ? `선택됨: ${selectedShapeTypeLabel}` : '도형을 클릭해 선택하세요' }}
+        {{ hasShapeSelection ? `선택됨: ${selectedShapeTypeLabel}` : hasGuideSelection ? `선택됨: ${selectedGuideTypeLabel}` : '도형을 클릭해 선택하세요' }}
       </p>
     </div>
 
-    <section v-if="hasSelection" class="panel-section">
+    <section v-if="hasShapeSelection" class="panel-section">
       <h4 class="panel-title">선택 도형 정보</h4>
       <div class="space-y-1.5 mb-2">
         <div class="info-row"><span class="info-key">타입</span><span class="info-value">{{ selectedShapeTypeLabel }}</span></div>
@@ -497,17 +550,27 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
     </section>
 
+    <section v-else-if="hasGuideSelection" class="panel-section">
+      <h4 class="panel-title">선택 가이드 정보</h4>
+      <div class="space-y-1.5 mb-2">
+        <div class="info-row"><span class="info-key">타입</span><span class="info-value">{{ selectedGuideTypeLabel }}</span></div>
+        <div v-if="selectedGuide?.type === 'text'" class="info-row"><span class="info-key">텍스트</span><span class="info-value">{{ selectedGuide?.text || '(빈 텍스트)' }}</span></div>
+        <div v-if="selectedGuide?.type === 'text'" class="info-row"><span class="info-key">표기</span><span class="info-value">{{ selectedGuide?.useLatex ? 'LaTeX' : '일반 텍스트' }}</span></div>
+        <div class="info-row"><span class="info-key">색상</span><span class="color-chip" :title="getColorChipTitle(selectedGuideColor)" :style="{ backgroundColor: selectedGuideColor }"></span></div>
+      </div>
+    </section>
+
     <section class="panel-section">
       <h4 class="panel-title">선택</h4>
       <div class="grid grid-cols-2 gap-2">
         <button class="action-btn col-span-2" :class="{ active: toolStore.mode === 'select' }" @click="toolStore.setMode('select')">선택/이동 모드</button>
-        <button class="action-btn" :disabled="!hasSelection" @click="duplicateSelected">복제</button>
+        <button class="action-btn" :disabled="!hasShapeSelection" @click="duplicateSelected">복제</button>
         <button class="action-btn danger" :disabled="!hasSelection" @click="deleteSelected">삭제</button>
       </div>
       <p class="text-[11px] text-gray-500 mt-2">도형 선택·수정 | Space + 드래그로 화면 이동</p>
     </section>
 
-    <section v-if="hasSelection" class="panel-section">
+    <section v-if="hasShapeSelection" class="panel-section">
       <h4 class="panel-title">회전/대칭</h4>
       <p class="text-[11px] text-gray-500">도형 회전은 캔버스에서 마우스 드래그로도 조절 가능합니다</p>
       <div class="flex items-center gap-2 mt-2">
@@ -524,7 +587,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
 
     <section class="panel-section">
       <h4 class="panel-title">색상 변경</h4>
-      <div v-if="hasSelection" class="space-y-2">
+      <div v-if="hasShapeSelection" class="space-y-2">
         <div v-if="!isArrowSelection && (selectedPointVisible || isLineSelection || isAngleLineSelection)">
           <p class="text-xs text-gray-500 mb-1">점 색상</p>
           <div class="flex items-center flex-wrap gap-1.5">
@@ -554,6 +617,30 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
           </div>
         </div>
       </div>
+      <div v-else-if="hasGuideSelection" class="space-y-2">
+        <div>
+          <p class="text-xs text-gray-500 mb-1">{{ selectedGuide?.type === 'text' ? '텍스트 색상' : '가이드 색상' }}</p>
+          <div class="flex items-center flex-wrap gap-1.5">
+            <button v-for="color in STROKE_PALETTE" :key="`guide-text-${color.id}`" class="w-5 h-5 rounded-full border hover:scale-110 transition" :class="selectedGuideColor === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setSelectedGuideColor(color.hex)"></button>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 mb-1">글자 크기</p>
+          <div class="flex items-center gap-1">
+            <button class="step-btn" @click="setSelectedGuideFontSize(selectedGuideFontSize - 1)">-</button>
+            <span class="text-xs w-12 text-center">{{ selectedGuideFontSize }}</span>
+            <button class="step-btn" @click="setSelectedGuideFontSize(selectedGuideFontSize + 1)">+</button>
+          </div>
+        </div>
+        <div v-if="selectedGuide?.type !== 'text'">
+          <p class="text-xs text-gray-500 mb-1">선 굵기 (pt)</p>
+          <div class="flex items-center gap-1">
+            <button class="step-btn" @click="setSelectedGuideLineWidth(selectedGuideLineWidth - 0.1)">-</button>
+            <span class="text-xs w-12 text-center">{{ selectedGuideLineWidth.toFixed(1) }}</span>
+            <button class="step-btn" @click="setSelectedGuideLineWidth(selectedGuideLineWidth + 0.1)">+</button>
+          </div>
+        </div>
+      </div>
       <div v-else class="space-y-2">
         <div>
           <p class="text-xs text-gray-500 mb-1">모눈/점판 색상</p>
@@ -571,7 +658,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
     </section>
 
-    <section v-if="hasSelection" class="panel-section">
+    <section v-if="hasShapeSelection" class="panel-section">
       <h4 class="panel-title">레이어 순서</h4>
       <div class="grid grid-cols-4 gap-2">
         <button class="layer-icon-btn" title="앞으로" @click="reorderLayer('up')">앞</button>
@@ -581,7 +668,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
     </section>
 
-    <section class="panel-section">
+    <section v-if="!hasTextGuideSelection" class="panel-section">
       <h4 class="panel-title">가이드</h4>
       <div class="space-y-2">
         <label v-if="isShapeGuideAvailable(selectedShape, 'length')" class="toggle-row"><span>길이</span><button class="guide-toggle-btn" @click="hasSelection ? toggleSelectedGuide('length') : toggleGlobalGuide('length')">{{ hasSelection ? getSelectedGuideIndicator('length') : getGlobalGuideIndicator('length') }}</button></label>
@@ -607,7 +694,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
             <button class="action-btn text-xs px-2 py-1" @click="cycleSelectedHeightBase(1)">다음 변</button>
           </div>
         </div>
-        <label class="toggle-row"><span>단위 표시 (cm)</span><button class="guide-toggle-btn" @click="toolStore.setShowGuideUnit(!toolStore.showGuideUnit)">{{ toolStore.showGuideUnit ? '●' : '' }}</button></label>
+        <label v-if="!isArrowSelection" class="toggle-row"><span>단위 표시 (cm)</span><button class="guide-toggle-btn" @click="toolStore.setShowGuideUnit(!toolStore.showGuideUnit)">{{ toolStore.showGuideUnit ? '●' : '' }}</button></label>
       </div>
     </section>
   </div>
@@ -670,4 +757,3 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
   background-size: 12px 12px;
 }
 </style>
-

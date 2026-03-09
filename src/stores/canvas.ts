@@ -14,6 +14,7 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   // 선택된 도형 ID
   const selectedShapeId = ref<string | null>(null)
+  const selectedGuideId = ref<string | null>(null)
 
   // 히스토리 (실행취소용)
   const history = ref<CanvasSnapshot[]>([])
@@ -22,6 +23,9 @@ export const useCanvasStore = defineStore('canvas', () => {
   // 선택된 도형
   const selectedShape = computed(() =>
     shapes.value.find(s => s.id === selectedShapeId.value) || null
+  )
+  const selectedGuide = computed(() =>
+    guides.value.find(g => g.id === selectedGuideId.value) || null
   )
 
   // 히스토리 저장
@@ -279,13 +283,18 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (index !== -1) {
       guides.value.splice(index, 1)
     }
+    if (selectedGuideId.value === id) {
+      selectedGuideId.value = null
+    }
   }
 
   // 가이드 수정
-  function updateGuide(id: string, updater: (guide: Guide) => Guide) {
+  function updateGuide(id: string, updater: (guide: Guide) => Guide, recordHistory: boolean = true) {
     const index = guides.value.findIndex(g => g.id === id)
     if (index === -1) return
-    saveHistory()
+    if (recordHistory) {
+      saveHistory()
+    }
     guides.value[index] = updater(guides.value[index])
   }
 
@@ -310,6 +319,12 @@ export const useCanvasStore = defineStore('canvas', () => {
   // 도형 선택
   function selectShape(id: string | null) {
     selectedShapeId.value = id
+    selectedGuideId.value = null
+  }
+
+  function selectGuide(id: string | null) {
+    selectedGuideId.value = id
+    selectedShapeId.value = null
   }
 
   // 전체 초기화
@@ -318,6 +333,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     shapes.value = []
     guides.value = []
     selectedShapeId.value = null
+    selectedGuideId.value = null
   }
 
   function getSnapshot(): CanvasSnapshot {
@@ -331,6 +347,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     shapes.value = JSON.parse(JSON.stringify(snapshot.shapes))
     guides.value = JSON.parse(JSON.stringify(snapshot.guides))
     selectedShapeId.value = null
+    selectedGuideId.value = null
   }
 
   // 실행취소
@@ -361,7 +378,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     shapes,
     guides,
     selectedShapeId,
+    selectedGuideId,
     selectedShape,
+    selectedGuide,
     canUndo,
     canRedo,
     saveHistory,
@@ -383,6 +402,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     removeGuide,
     removeLastGuide,
     selectShape,
+    selectGuide,
     clearAll,
     getSnapshot,
     loadSnapshot,

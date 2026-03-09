@@ -487,6 +487,11 @@ function toggleGuideVisibility(guideId: string, visible: boolean) {
   canvasStore.setGuideVisible(guideId, !visible)
 }
 
+function selectGuideLayer(guideId: string) {
+  canvasStore.selectGuide(guideId)
+  activeTab.value = 'info'
+}
+
 function handleKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -507,6 +512,7 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault()
     toolStore.clearTempPoints()
     canvasStore.selectShape(null)
+    canvasStore.selectGuide(null)
     closeContextMenu()
     return
   }
@@ -725,7 +731,8 @@ onUnmounted(() => {
                   <div
                     v-for="guide in group.guides"
                     :key="guide.id"
-                    class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700"
+                    class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700 cursor-pointer hover:bg-orange-100/70"
+                    @click="selectGuideLayer(guide.guideId)"
                   >
                     <span class="text-base leading-none">{{ guide.icon }}</span>
                     <span class="truncate flex-1">{{ guide.label }}</span>
@@ -741,7 +748,8 @@ onUnmounted(() => {
                 <div
                   v-for="guide in unboundGuides"
                   :key="guide.id"
-                  class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700"
+                  class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700 cursor-pointer hover:bg-orange-100/70"
+                  @click="selectGuideLayer(guide.guideId)"
                 >
                   <span class="text-base leading-none">{{ guide.icon }}</span>
                   <span class="truncate flex-1">{{ guide.label }}</span>
@@ -802,4 +810,3 @@ onUnmounted(() => {
   @apply text-xs px-1.5 py-0.5 rounded border border-gray-300 bg-white hover:bg-gray-100 transition;
 }
 </style>
-
