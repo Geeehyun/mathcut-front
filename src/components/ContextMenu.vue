@@ -41,6 +41,7 @@ const BLANK_WIDTH_STEP_MM = 0.5
 const BLANK_WIDTH_MIN_MM = 3
 const BLANK_WIDTH_MAX_MM = 50
 const BLANK_WIDTH_DEFAULT_MM = 7
+const LENGTH_CURVE_OFFSET_PX = 24
 
 function updateViewportPosition() {
   const margin = 8
@@ -481,6 +482,7 @@ function patchShapeGuideItemStyle(patch: {
   color?: string
   textColor?: string
   lineColor?: string
+  curveSide?: 1 | -1
   heightLineColor?: string
   measureLineColor?: string
   textMode?: 'normal' | 'blank'
@@ -534,6 +536,46 @@ function toggleShapeGuideItemVisible() {
 function toggleShapeGuideItemBlank() {
   if (!targetShape.value || props.target?.kind !== 'shape-guide-item') return
   patchShapeGuideItemStyle({ textMode: isShapeGuideItemBlank() ? 'normal' : 'blank' })
+}
+
+function getDefaultLengthCurveSide(shape: any, itemIndex: number): 1 | -1 {
+  if (shape.type === 'circle') return 1
+  const p1 = shape.points[itemIndex]
+  const p2 = shape.points[(itemIndex + 1) % shape.points.length]
+  if (!p1 || !p2) return 1
+  const mx = (p1.x + p2.x) / 2
+  const my = (p1.y + p2.y) / 2
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const a = { x: mx + nx * LENGTH_CURVE_OFFSET_PX, y: my + ny * LENGTH_CURVE_OFFSET_PX }
+  const b = { x: mx - nx * LENGTH_CURVE_OFFSET_PX, y: my - ny * LENGTH_CURVE_OFFSET_PX }
+  const center = shape.points.reduce((acc: any, p: any) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 })
+  center.x /= Math.max(1, shape.points.length)
+  center.y /= Math.max(1, shape.points.length)
+  const da = Math.hypot(a.x - center.x, a.y - center.y)
+  const db = Math.hypot(b.x - center.x, b.y - center.y)
+  return da >= db ? 1 : -1
+}
+
+function getCurrentGuideCurveSide(shape: any, guideKey: 'length' | 'height', itemIndex: number): 1 | -1 {
+  const style = getShapeGuideItemStyle() as any
+  if (style.curveSide === 1 || style.curveSide === -1) return style.curveSide
+  if (guideKey === 'height') return 1
+  return getDefaultLengthCurveSide(shape, itemIndex)
+}
+
+function toggleGuideCurveSide() {
+  if (!targetShape.value || props.target?.kind !== 'shape-guide-item') return
+  if (props.target.guideKey !== 'length' && props.target.guideKey !== 'height') return
+  const guideKey = props.target.guideKey
+  const style = getShapeGuideItemStyle() as any
+  const current = style.curveSide === 1 || style.curveSide === -1
+    ? style.curveSide
+    : getCurrentGuideCurveSide(targetShape.value, guideKey, props.target.itemIndex)
+  patchShapeGuideItemStyle({ curveSide: current === 1 ? -1 : 1 })
 }
 
 function selectAllShapes() {
@@ -816,6 +858,17 @@ onUnmounted(() => {
               @click="setCircleMeasureMode(selectedCircleMeasureMode === 'diameter' ? 'radius' : 'diameter')"
             >
               {{ selectedCircleMeasureMode === 'diameter' ? '반지름으로 변경' : '지름으로 변경' }}
+            </button>
+          </div>
+          <div
+            v-if="shapeGuideItemKey === 'length' || shapeGuideItemKey === 'height'"
+            class="pt-1 border-t border-gray-100"
+          >
+            <button
+              class="px-2 py-1 border rounded text-xs hover:bg-gray-50"
+              @click="toggleGuideCurveSide"
+            >
+              보조선 뒤집기
             </button>
           </div>
           <div>

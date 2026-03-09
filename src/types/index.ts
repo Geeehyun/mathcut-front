@@ -55,6 +55,7 @@ export interface ShapeGuideItemStyle {
   color?: string
   textColor?: string
   lineColor?: string
+  curveSide?: 1 | -1
   heightLineColor?: string
   heightLineWidth?: number
   measureLineColor?: string

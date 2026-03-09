@@ -236,7 +236,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     id: string,
     key: 'length' | 'angle' | 'pointName' | 'height',
     itemIndex: number,
-    patch: { color?: string, fontSize?: number, lineWidth?: number, offsetX?: number, offsetY?: number },
+    patch: { color?: string, fontSize?: number, lineWidth?: number, offsetX?: number, offsetY?: number, curveSide?: 1 | -1 },
     recordHistory: boolean = true
   ) {
     const shapeIndex = shapes.value.findIndex(s => s.id === id)
