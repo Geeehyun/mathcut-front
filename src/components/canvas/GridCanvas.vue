@@ -1922,7 +1922,7 @@ function getShapeHeightBaseEdgeIndex(shape: Shape): number {
 }
 
 function getShapeHeightGuide(shape: Shape): { apex: Point, foot: Point, baseA: Point, baseB: Point, t: number } | null {
-  if (shape.type === 'circle' || openShapeTypes.has(shape.type) || shape.points.length < 3) return null
+  if (shape.type === 'circle' || shape.type === 'triangle-right' || openShapeTypes.has(shape.type) || shape.points.length < 3) return null
   const baseIndex = getShapeHeightBaseEdgeIndex(shape)
   const baseA = shape.points[baseIndex]
   const baseB = shape.points[(baseIndex + 1) % shape.points.length]
@@ -1959,6 +1959,14 @@ function getShapeHeightGuide(shape: Shape): { apex: Point, foot: Point, baseA: P
 
   if (!bestApex || !bestFoot || bestDist <= 1e-6) return null
   return { apex: bestApex, foot: bestFoot, baseA, baseB, t: bestT }
+}
+
+function getShapeHeightRightAngleMarkerPoints(shape: Shape): number[] {
+  const h = getShapeHeightGuide(shape)
+  if (!h) return []
+  if (!isRightAngleByThreePoints(h.baseA, h.foot, h.apex)) return []
+  const marker = getRightAngleGuideMarkerPoints(h.baseA, h.foot, h.apex, RIGHT_ANGLE_MARKER_SIZE)
+  return [marker.p1.x, marker.p1.y, marker.corner.x, marker.corner.y, marker.p2.x, marker.p2.y]
 }
 
 function getTwoPointLengthCurvePoints(p1: { x: number, y: number }, p2: { x: number, y: number }): number[] {
@@ -2776,6 +2784,15 @@ defineExpose({ exportImage })
                   stroke: getShapeHeightMainLineColor(shape),
                   strokeWidth: getShapeHeightMainLineWidth(shape),
                   dash: GUIDE_DASH_PATTERN
+                }"
+                @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
+              />
+              <v-line
+                v-if="getShapeHeightRightAngleMarkerPoints(shape).length"
+                :config="{
+                  points: getShapeHeightRightAngleMarkerPoints(shape),
+                  stroke: ANGLE_GUIDE_DEFAULT_COLOR,
+                  strokeWidth: DEFAULT_GUIDE_LINE_PX
                 }"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
               />

@@ -283,7 +283,7 @@ const shapeGuideVisibility = computed(() => ({
 
 const isHeightGuideToggleVisible = computed(() => {
   if (!targetShape.value) return false
-  return targetShape.value.type !== 'circle' && targetShape.value.type !== 'segment'
+  return targetShape.value.type !== 'circle' && targetShape.value.type !== 'segment' && targetShape.value.type !== 'triangle-right'
 })
 
 const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'])
@@ -291,6 +291,7 @@ const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow',
 const isHeightBaseConfigurable = computed(() => {
   if (!targetShape.value) return false
   return targetShape.value.type !== 'circle'
+    && targetShape.value.type !== 'triangle-right'
     && !openShapeTypes.has(targetShape.value.type)
     && targetShape.value.points.length >= 3
 })

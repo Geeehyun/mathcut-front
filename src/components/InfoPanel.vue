@@ -134,6 +134,7 @@ function getColorChipTitle(value: string): string {
 const isHeightBaseConfigurable = computed(() => {
   if (!selectedShape.value) return false
   return selectedShape.value.type !== 'circle'
+    && selectedShape.value.type !== 'triangle-right'
     && !openShapeTypes.has(selectedShape.value.type)
     && selectedShape.value.points.length >= 3
 })
@@ -203,6 +204,7 @@ function isShapeGuideAvailable(shape: Shape | null, key: GuideToggleKey): boolea
   }
   if (key === 'height') {
     if (shape.type === 'circle' || openShapeTypes.has(shape.type)) return false
+    if (shape.type === 'triangle-right') return false
     if (shape.type === 'rectangle' || shape.type === 'rect-rectangle' || shape.type === 'rect-square') return false
     return shape.points.length >= 3
   }

@@ -29,7 +29,6 @@ export function useShape() {
   const defaultHeightVisibleTypes = new Set([
     'triangle',
     'triangle-equilateral',
-    'triangle-right',
     'triangle-isosceles',
     'triangle-free',
     'rect-trapezoid',

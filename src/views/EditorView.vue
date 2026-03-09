@@ -244,7 +244,6 @@ function isShapeHeightDefaultVisible(shape: Shape): boolean {
   return shape.type === 'triangle'
     || shape.type === 'triangle-free'
     || shape.type === 'triangle-equilateral'
-    || shape.type === 'triangle-right'
     || shape.type === 'triangle-isosceles'
     || shape.type === 'rect-trapezoid'
     || shape.type === 'rect-rhombus'
@@ -397,7 +396,7 @@ const groupedLayers = computed(() => {
       visible: isShapeGuideItemVisibleInLayer(shape, 'angle', aIndex)
     }))
 
-    const heightItems = (!isOpenShape && shape.type !== 'circle' && shape.points.length >= 3)
+    const heightItems = (!isOpenShape && shape.type !== 'circle' && shape.type !== 'triangle-right' && shape.points.length >= 3)
       ? [{
         id: `auto-height-${shape.id}-0`,
         icon: '↕',
