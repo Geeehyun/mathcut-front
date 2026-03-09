@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>모눈종이 도형 그리기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .toolbar-section {
+            display: flex;
+            gap: 10px;
+            padding-right: 15px;
+            border-right: 2px solid #ddd;
+        }
+        
+        .toolbar-section:last-child {
+            border-right: none;
+        }
+        
+        .toolbar-label {
+            font-size: 14px;
+            color: #666;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #f0f0f0;
+        }
+        
+        button.active {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+        
+        button.clear {
+            background: #f44336;
+            color: white;
+            border-color: #f44336;
+        }
+        
+        button.clear:hover {
+            background: #d32f2f;
+        }
+        
+        #canvas {
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            display: block;
+            background: white;
+            cursor: crosshair;
+        }
+        
+        .grid-line {
+            stroke: #e0e0e0;
+            stroke-width: 1;
+        }
+        
+        .grid-line.major {
+            stroke: #ccc;
+            stroke-width: 1.5;
+        }
+        
+        .shape {
+            fill: rgba(33, 150, 243, 0.1);
+            stroke: #2196F3;
+            stroke-width: 2;
+        }
+        
+        /* 파스텔 스타일 */
+        .shape.pastel {
+            fill: rgba(255, 182, 193, 0.3);
+            stroke: #FFB6C1;
+            stroke-width: 2.5;
+        }
+        
+        /* 흑백 스타일 */
+        .shape.blackwhite {
+            fill: rgba(200, 200, 200, 0.2);
+            stroke: #333;
+            stroke-width: 2;
+        }
+        
+        .temp-shape {
+            fill: rgba(255, 152, 0, 0.1);
+            stroke: #FF9800;
+            stroke-width: 2;
+            stroke-dasharray: 5, 5;
+        }
+        
+        .point {
+            fill: #2196F3;
+            cursor: pointer;
+        }
+        
+        .point.pastel {
+            fill: #FFB6C1;
+        }
+        
+        .point.blackwhite {
+            fill: #333;
+        }
+        
+        .point:hover {
+            fill: #1976D2;
+        }
+        
+        .point.pastel:hover {
+            fill: #FF69B4;
+        }
+        
+        .point.blackwhite:hover {
+            fill: #000;
+        }
+        
+        .temp-point {
+            fill: #FF9800;
+        }
+        
+        .length-label {
+            font-size: 12px;
+            fill: #666;
+            font-weight: bold;
+        }
+        
+        .length-label.pastel {
+            fill: #FF69B4;
+        }
+        
+        .length-label.blackwhite {
+            fill: #000;
+        }
+        
+        .guide-line {
+            stroke: #FF9800;
+            stroke-width: 2;
+            stroke-dasharray: 5, 5;
+            fill: none;
+        }
+        
+        .guide-text {
+            font-size: 14px;
+            fill: #FF9800;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .guide-text:hover {
+            fill: #F57C00;
+        }
+        
+        .guide-angle-arc {
+            stroke: #9C27B0;
+            stroke-width: 2;
+            fill: rgba(156, 39, 176, 0.1);
+        }
+        
+        .guide-marker {
+            fill: #FF9800;
+        }
+        
+        .mode-switch {
+            display: flex;
+            gap: 0;
+            background: #f0f0f0;
+            border-radius: 5px;
+            padding: 2px;
+        }
+        
+        .mode-switch button {
+            border: none;
+            background: transparent;
+            padding: 8px 16px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        
+        .mode-switch button.active {
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        #info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        
+        #info h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        #lengths {
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        .instruction {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📐 모눈종이 도형 그리기</h1>
+        
+        <div class="instruction" id="instruction">
+            도형 종류를 선택하고 격자 교차점을 클릭해서 그려보세요!
+        </div>
+        
+        <div class="toolbar">
+            <div class="toolbar-section">
+                <div class="mode-switch">
+                    <button id="btn-mode-shape" onclick="switchToShapeMode()" class="active">도형 그리기</button>
+                    <button id="btn-mode-guide" onclick="switchToGuideMode()">가이드 추가</button>
+                </div>
+            </div>
+            
+            <div class="toolbar-section" id="shape-toolbar">
+                <span class="toolbar-label">도형:</span>
+                <button id="btn-rectangle" onclick="setMode('rectangle')">사각형 (4점)</button>
+                <button id="btn-triangle" onclick="setMode('triangle')">삼각형 (3점)</button>
+                <button id="btn-line" onclick="setMode('line')">자유 직선</button>
+                <button id="btn-circle" onclick="setMode('circle')">원 (2점)</button>
+            </div>
+            
+            <div class="toolbar-section" id="style-toolbar">
+                <span class="toolbar-label">스타일:</span>
+                <button id="btn-style-default" onclick="setStyle('default')" class="active">기본</button>
+                <button id="btn-style-pastel" onclick="setStyle('pastel')">파스텔</button>
+                <button id="btn-style-blackwhite" onclick="setStyle('blackwhite')">흑백</button>
+            </div>
+            
+            <div class="toolbar-section" id="guide-toolbar" style="display: none;">
+                <span class="toolbar-label">가이드:</span>
+                <button id="btn-guide-length" onclick="setGuideType('length')" class="active">길이 표시</button>
+                <button id="btn-guide-text" onclick="setGuideType('text')">텍스트 추가</button>
+                <button id="btn-guide-angle" onclick="setGuideType('angle')">각도 표시</button>
+            </div>
+            
+            <div class="toolbar-section">
+                <button class="clear" onclick="clearAll()">전체 초기화</button>
+                <button onclick="undoLast()">마지막 취소</button>
+            </div>
+        </div>
+        
+        <svg id="canvas" width="800" height="500"></svg>
+        
+        <div id="info">
+            <h3>📏 측정 정보</h3>
+            <div id="lengths">도형을 그리면 여기에 길이 정보가 표시됩니다.</div>
+        </div>
+    </div>
+
+    <script>
+        const gridSize = 20; // 한 칸의 크기 (px)
+        const gridWidth = 40; // 가로 칸 수
+        const gridHeight = 25; // 세로 칸 수
+        
+        let currentMode = 'rectangle';
+        let currentStyle = 'default'; // 현재 선택된 스타일
+        let clickedPoints = [];
+        let shapes = [];
+        
+        // 가이드 관련
+        let isGuideMode = false; // 가이드 모드 여부
+        let guideType = 'length'; // length, text, angle
+        let guidePoints = []; // 가이드 작성 중인 점들
+        let guides = []; // 완성된 가이드들
+        
+        const svg = document.getElementById('canvas');
+        const lengthsDiv = document.getElementById('lengths');
+        const instructionDiv = document.getElementById('instruction');
+        
+        // 격자 그리기
+        function drawGrid() {
+            // 세로선
+            for (let i = 0; i <= gridWidth; i++) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', i * gridSize);
+                line.setAttribute('y1', 0);
+                line.setAttribute('x2', i * gridSize);
+                line.setAttribute('y2', gridHeight * gridSize);
+                line.setAttribute('class', i % 5 === 0 ? 'grid-line major' : 'grid-line');
+                svg.appendChild(line);
+            }
+            
+            // 가로선
+            for (let i = 0; i <= gridHeight; i++) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', 0);
+                line.setAttribute('y1', i * gridSize);
+                line.setAttribute('x2', gridWidth * gridSize);
+                line.setAttribute('y2', i * gridSize);
+                line.setAttribute('class', i % 5 === 0 ? 'grid-line major' : 'grid-line');
+                svg.appendChild(line);
+            }
+        }
+        
+        // 모드 설정
+        function setMode(mode) {
+            currentMode = mode;
+            clickedPoints = [];
+            updateTempShapes();
+            updateButtons();
+            updateInstruction();
+        }
+        
+        // 스타일 설정
+        function setStyle(style) {
+            currentStyle = style;
+            updateStyleButtons();
+        }
+        
+        // 모드 전환 함수
+        function switchToShapeMode() {
+            isGuideMode = false;
+            guidePoints = [];
+            document.getElementById('btn-mode-shape').classList.add('active');
+            document.getElementById('btn-mode-guide').classList.remove('active');
+            document.getElementById('shape-toolbar').style.display = 'flex';
+            document.getElementById('style-toolbar').style.display = 'flex';
+            document.getElementById('guide-toolbar').style.display = 'none';
+            updateInstruction();
+            updateTempGuides();
+        }
+        
+        function switchToGuideMode() {
+            isGuideMode = true;
+            clickedPoints = [];
+            guidePoints = [];
+            document.getElementById('btn-mode-shape').classList.remove('active');
+            document.getElementById('btn-mode-guide').classList.add('active');
+            document.getElementById('shape-toolbar').style.display = 'none';
+            document.getElementById('style-toolbar').style.display = 'none';
+            document.getElementById('guide-toolbar').style.display = 'flex';
+            updateTempShapes();
+            updateInstruction();
+        }
+        
+        // 가이드 타입 설정
+        function setGuideType(type) {
+            guideType = type;
+            guidePoints = [];
+            updateGuideButtons();
+            updateInstruction();
+            updateTempGuides();
+        }
+        
+        // 가이드 버튼 활성화 상태 업데이트
+        function updateGuideButtons() {
+            document.querySelectorAll('[id^="btn-guide-"]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`btn-guide-${guideType}`).classList.add('active');
+        }
+        
+        // 스타일 버튼 활성화 상태 업데이트
+        function updateStyleButtons() {
+            document.querySelectorAll('[id^="btn-style-"]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`btn-style-${currentStyle}`).classList.add('active');
+        }
+        
+        // 버튼 활성화 상태 업데이트
+        function updateButtons() {
+            document.querySelectorAll('.toolbar button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`btn-${currentMode}`).classList.add('active');
+        }
+        
+        // 안내 문구 업데이트
+        function updateInstruction() {
+            if (!isGuideMode) {
+                const instructions = {
+                    rectangle: '사각형: 네 개의 점을 클릭하세요 (순서대로 연결됩니다)',
+                    triangle: '삼각형: 세 개의 점을 클릭하세요',
+                    line: '자유 직선: 점을 계속 클릭하세요. 첫 점을 다시 클릭하면 도형이 완성됩니다',
+                    circle: '원: 중심점과 원 위의 한 점을 클릭하세요'
+                };
+                instructionDiv.textContent = instructions[currentMode];
+            } else {
+                const guideInstructions = {
+                    length: '길이 표시: 두 점을 클릭하세요 (모서리 또는 격자점). 원의 경우 중심점과 변 위의 점을 클릭하세요',
+                    text: '텍스트 추가: 텍스트를 배치할 위치를 클릭하세요',
+                    angle: '각도 표시: 세 점을 순서대로 클릭하세요 (변1의 점 - 꼭지점 - 변2의 점)'
+                };
+                instructionDiv.textContent = guideInstructions[guideType];
+            }
+        }
+        
+        // 클릭 이벤트
+        svg.addEventListener('click', function(e) {
+            const rect = svg.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 가장 가까운 격자 교차점 찾기
+            const gridX = Math.round(x / gridSize);
+            const gridY = Math.round(y / gridSize);
+            
+            const point = {
+                x: gridX * gridSize,
+                y: gridY * gridSize,
+                gridX: gridX,
+                gridY: gridY
+            };
+            
+            // 가이드 모드 처리
+            if (isGuideMode) {
+                handleGuideClick(point);
+                return;
+            }
+            
+            // 도형 그리기 모드 처리
+            // 자유 직선 모드에서 첫 점 재클릭 체크
+            if (currentMode === 'line' && clickedPoints.length >= 3) {
+                const firstPoint = clickedPoints[0];
+                if (firstPoint.gridX === gridX && firstPoint.gridY === gridY) {
+                    // 첫 점을 다시 클릭했으면 도형 완성
+                    createShape('polygon', [...clickedPoints]);
+                    clickedPoints = [];
+                    updateTempShapes();
+                    return;
+                }
+            }
+            
+            clickedPoints.push(point);
+            updateTempShapes();
+            
+            // 도형 완성 체크
+            checkShapeComplete();
+        });
+        
+        // 임시 도형 업데이트
+        function updateTempShapes() {
+            // 기존 임시 요소 제거
+            svg.querySelectorAll('.temp-shape, .temp-point').forEach(el => el.remove());
+            
+            // 현재 클릭된 점들 표시
+            clickedPoints.forEach((point, index) => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', point.x);
+                circle.setAttribute('cy', point.y);
+                circle.setAttribute('r', 4);
+                circle.setAttribute('class', 'temp-point');
+                svg.appendChild(circle);
+            });
+            
+            // 임시 선 그리기
+            if (clickedPoints.length > 1) {
+                if (currentMode === 'line' || currentMode === 'rectangle' || currentMode === 'triangle') {
+                    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+                    const points = clickedPoints.map(p => `${p.x},${p.y}`).join(' ');
+                    polyline.setAttribute('points', points);
+                    polyline.setAttribute('class', 'temp-shape');
+                    svg.appendChild(polyline);
+                }
+            }
+            
+            // 원 임시 표시
+            if (currentMode === 'circle' && clickedPoints.length === 2) {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                const dx = clickedPoints[1].x - clickedPoints[0].x;
+                const dy = clickedPoints[1].y - clickedPoints[0].y;
+                const radius = Math.sqrt(dx * dx + dy * dy);
+                circle.setAttribute('cx', clickedPoints[0].x);
+                circle.setAttribute('cy', clickedPoints[0].y);
+                circle.setAttribute('r', radius);
+                circle.setAttribute('class', 'temp-shape');
+                svg.appendChild(circle);
+            }
+        }
+        
+        // 도형 완성 체크
+        function checkShapeComplete() {
+            let complete = false;
+            
+            if (currentMode === 'rectangle' && clickedPoints.length === 4) {
+                complete = true;
+                createShape('rectangle', [...clickedPoints]);
+            } else if (currentMode === 'triangle' && clickedPoints.length === 3) {
+                complete = true;
+                createShape('triangle', [...clickedPoints]);
+            } else if (currentMode === 'circle' && clickedPoints.length === 2) {
+                complete = true;
+                createShape('circle', [...clickedPoints]);
+            }
+            
+            if (complete) {
+                clickedPoints = [];
+                updateTempShapes();
+            }
+        }
+        
+        // 도형 생성
+        function createShape(type, points) {
+            const shapeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            
+            if (type === 'rectangle' || type === 'triangle' || type === 'polygon') {
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ');
+                polygon.setAttribute('points', pointsStr);
+                polygon.setAttribute('class', `shape ${currentStyle}`);
+                shapeGroup.appendChild(polygon);
+                
+                // 직각 찾아서 표시
+                const rightAngles = findRightAngles(points);
+                rightAngles.forEach(angleIndex => {
+                    drawRightAngleMarker(shapeGroup, points, angleIndex);
+                });
+                
+                // 각 변에 길이 표시
+                for (let i = 0; i < points.length; i++) {
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % points.length];
+                    const midX = (p1.x + p2.x) / 2;
+                    const midY = (p1.y + p2.y) / 2;
+                    const distance = calculateDistance(p1, p2);
+                    
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', midX);
+                    text.setAttribute('y', midY - 5);
+                    text.setAttribute('class', `length-label ${currentStyle}`);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.textContent = distance.toFixed(1);
+                    shapeGroup.appendChild(text);
+                }
+                
+                // 점 표시
+                points.forEach(p => {
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', p.x);
+                    circle.setAttribute('cy', p.y);
+                    circle.setAttribute('r', 3);
+                    circle.setAttribute('class', `point ${currentStyle}`);
+                    shapeGroup.appendChild(circle);
+                });
+                
+            } else if (type === 'circle') {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                const dx = points[1].x - points[0].x;
+                const dy = points[1].y - points[0].y;
+                const radius = Math.sqrt(dx * dx + dy * dy);
+                circle.setAttribute('cx', points[0].x);
+                circle.setAttribute('cy', points[0].y);
+                circle.setAttribute('r', radius);
+                circle.setAttribute('class', `shape ${currentStyle}`);
+                shapeGroup.appendChild(circle);
+                
+                // 중심점
+                const centerPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                centerPoint.setAttribute('cx', points[0].x);
+                centerPoint.setAttribute('cy', points[0].y);
+                centerPoint.setAttribute('r', 3);
+                centerPoint.setAttribute('class', `point ${currentStyle}`);
+                shapeGroup.appendChild(centerPoint);
+                
+                // 중심점 아래에 'ㅇ' 표시
+                const centerLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                centerLabel.setAttribute('x', points[0].x);
+                centerLabel.setAttribute('y', points[0].y + 15);
+                centerLabel.setAttribute('class', `length-label ${currentStyle}`);
+                centerLabel.setAttribute('text-anchor', 'middle');
+                centerLabel.setAttribute('font-size', '14');
+                centerLabel.setAttribute('font-weight', 'bold');
+                centerLabel.textContent = 'ㅇ';
+                shapeGroup.appendChild(centerLabel);
+                
+                // 반지름 표시
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', points[0].x);
+                text.setAttribute('y', points[0].y - radius - 10);
+                text.setAttribute('class', `length-label ${currentStyle}`);
+                text.setAttribute('text-anchor', 'middle');
+                text.textContent = `반지름: ${(radius / gridSize).toFixed(1)}`;
+                shapeGroup.appendChild(text);
+            }
+            
+            svg.appendChild(shapeGroup);
+            shapes.push({ type, points, element: shapeGroup, style: currentStyle });
+            updateLengthInfo();
+        }
+        
+        // 거리 계산
+        function calculateDistance(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            return Math.sqrt(dx * dx + dy * dy) / gridSize; // 격자 단위로 변환
+        }
+        
+        // 직각 찾기 (벡터 내적 이용)
+        function findRightAngles(points) {
+            const rightAngles = [];
+            
+            for (let i = 0; i < points.length; i++) {
+                const prev = points[(i - 1 + points.length) % points.length];
+                const current = points[i];
+                const next = points[(i + 1) % points.length];
+                
+                // 벡터 계산
+                const v1x = prev.x - current.x;
+                const v1y = prev.y - current.y;
+                const v2x = next.x - current.x;
+                const v2y = next.y - current.y;
+                
+                // 내적 계산 (벡터가 수직이면 내적은 0)
+                const dotProduct = v1x * v2x + v1y * v2y;
+                
+                // 오차 허용 범위 (부동소수점 오차 고려)
+                if (Math.abs(dotProduct) < 1) {
+                    rightAngles.push(i);
+                }
+            }
+            
+            return rightAngles;
+        }
+        
+        // 직각 마커 그리기 (ㄱ 모양)
+        function drawRightAngleMarker(group, points, angleIndex) {
+            const prev = points[(angleIndex - 1 + points.length) % points.length];
+            const current = points[angleIndex];
+            const next = points[(angleIndex + 1) % points.length];
+            
+            // 벡터 정규화 (단위 벡터로 만들기)
+            const v1x = prev.x - current.x;
+            const v1y = prev.y - current.y;
+            const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
+            const u1x = v1x / len1;
+            const u1y = v1y / len1;
+            
+            const v2x = next.x - current.x;
+            const v2y = next.y - current.y;
+            const len2 = Math.sqrt(v2x * v2x + v2y * v2y);
+            const u2x = v2x / len2;
+            const u2y = v2y / len2;
+            
+            // 직각 마커 크기
+            const markerSize = 10;
+            
+            // ㄱ 모양 그리기
+            const p1x = current.x + u1x * markerSize;
+            const p1y = current.y + u1y * markerSize;
+            const cornerX = current.x + u1x * markerSize + u2x * markerSize;
+            const cornerY = current.y + u1y * markerSize + u2y * markerSize;
+            const p2x = current.x + u2x * markerSize;
+            const p2y = current.y + u2y * markerSize;
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const d = `M ${p1x} ${p1y} L ${cornerX} ${cornerY} L ${p2x} ${p2y}`;
+            path.setAttribute('d', d);
+            
+            // 스타일에 따른 색상 변경
+            let strokeColor = '#f44336'; // 기본: 빨강
+            if (currentStyle === 'pastel') {
+                strokeColor = '#FF69B4'; // 파스텔: 핫핑크
+            } else if (currentStyle === 'blackwhite') {
+                strokeColor = '#000'; // 흑백: 검정
+            }
+            
+            path.setAttribute('stroke', strokeColor);
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            
+            group.appendChild(path);
+        }
+        
+        // 길이 정보 업데이트
+        function updateLengthInfo() {
+            if (shapes.length === 0) {
+                lengthsDiv.textContent = '도형을 그리면 여기에 길이 정보가 표시됩니다.';
+                return;
+            }
+            
+            let html = '';
+            shapes.forEach((shape, index) => {
+                html += `<div style="margin-bottom: 10px;"><strong>도형 ${index + 1} (${getShapeName(shape.type)}):</strong><br>`;
+                
+                if (shape.type === 'rectangle' || shape.type === 'triangle' || shape.type === 'polygon') {
+                    for (let i = 0; i < shape.points.length; i++) {
+                        const p1 = shape.points[i];
+                        const p2 = shape.points[(i + 1) % shape.points.length];
+                        const distance = calculateDistance(p1, p2);
+                        html += `변 ${i + 1}: ${distance.toFixed(1)} 칸<br>`;
+                    }
+                    
+                    // 삼각형 종류 판별
+                    if (shape.type === 'triangle') {
+                        const triangleType = getTriangleType(shape.points);
+                        html += `<em style="color: #666;">→ ${triangleType}</em><br>`;
+                    }
+                } else if (shape.type === 'circle') {
+                    const dx = shape.points[1].x - shape.points[0].x;
+                    const dy = shape.points[1].y - shape.points[0].y;
+                    const radiusPixels = Math.sqrt(dx * dx + dy * dy);
+                    const radius = radiusPixels / gridSize;
+                    html += `반지름: ${radius.toFixed(1)} 칸<br>`;
+                    html += `지름: ${(radius * 2).toFixed(1)} 칸<br>`;
+                    html += `둘레: ${(2 * Math.PI * radius).toFixed(1)} 칸<br>`;
+                }
+                html += '</div>';
+            });
+            
+            lengthsDiv.innerHTML = html;
+        }
+        
+        // 도형 이름 가져오기
+        function getShapeName(type) {
+            const names = {
+                rectangle: '사각형',
+                triangle: '삼각형',
+                circle: '원',
+                polygon: '자유도형'
+            };
+            return names[type] || type;
+        }
+        
+        // 삼각형 종류 판별
+        function getTriangleType(points) {
+            const distances = [];
+            for (let i = 0; i < 3; i++) {
+                const p1 = points[i];
+                const p2 = points[(i + 1) % 3];
+                distances.push(calculateDistance(p1, p2));
+            }
+            distances.sort((a, b) => a - b);
+            
+            const [a, b, c] = distances;
+            const aSq = a * a;
+            const bSq = b * b;
+            const cSq = c * c;
+            
+            // 피타고라스 정리로 각도 판별
+            const diff = Math.abs(aSq + bSq - cSq);
+            
+            if (diff < 0.1) {
+                return '직각삼각형';
+            } else if (aSq + bSq > cSq) {
+                return '예각삼각형';
+            } else {
+                return '둔각삼각형';
+            }
+        }
+        
+        // 전체 초기화
+        function clearAll() {
+            shapes.forEach(shape => shape.element.remove());
+            shapes = [];
+            clickedPoints = [];
+            guides.forEach(guide => guide.element.remove());
+            guides = [];
+            guidePoints = [];
+            updateTempShapes();
+            updateTempGuides();
+            updateLengthInfo();
+        }
+        
+        // 가이드 클릭 처리
+        function handleGuideClick(point) {
+            guidePoints.push(point);
+            
+            let needPoints = 2; // 기본값
+            if (guideType === 'text') needPoints = 1;
+            if (guideType === 'angle') needPoints = 3;
+            
+            if (guidePoints.length >= needPoints) {
+                createGuide(guideType, [...guidePoints]);
+                guidePoints = [];
+            }
+            
+            updateTempGuides();
+        }
+        
+        // 임시 가이드 표시
+        function updateTempGuides() {
+            svg.querySelectorAll('.temp-guide').forEach(el => el.remove());
+            
+            if (!isGuideMode || guidePoints.length === 0) return;
+            
+            // 임시 점 표시
+            guidePoints.forEach(point => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', point.x);
+                circle.setAttribute('cy', point.y);
+                circle.setAttribute('r', 4);
+                circle.setAttribute('class', 'temp-guide guide-marker');
+                svg.appendChild(circle);
+            });
+            
+            // 길이 표시 임시선
+            if (guideType === 'length' && guidePoints.length === 1) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', guidePoints[0].x);
+                line.setAttribute('y1', guidePoints[0].y);
+                line.setAttribute('x2', guidePoints[0].x);
+                line.setAttribute('y2', guidePoints[0].y);
+                line.setAttribute('class', 'temp-guide guide-line');
+                svg.appendChild(line);
+            }
+        }
+        
+        // 가이드 생성
+        function createGuide(type, points) {
+            const guideGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            
+            if (type === 'length') {
+                createLengthGuide(guideGroup, points);
+            } else if (type === 'text') {
+                createTextGuide(guideGroup, points);
+            } else if (type === 'angle') {
+                createAngleGuide(guideGroup, points);
+            }
+            
+            svg.appendChild(guideGroup);
+            guides.push({ type, points, element: guideGroup });
+        }
+        
+        // 길이 가이드 생성
+        function createLengthGuide(group, points) {
+            const p1 = points[0];
+            const p2 = points[1];
+            
+            // 중간점 계산
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            
+            // 거리 계산
+            const distance = calculateDistance(p1, p2);
+            
+            // 점선으로 연결 (곡선)
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            
+            // 수직 방향으로 오프셋 (곡선 효과)
+            const offsetX = -dy / len * 20;
+            const offsetY = dx / len * 20;
+            
+            const controlX = midX + offsetX;
+            const controlY = midY + offsetY;
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const d = `M ${p1.x} ${p1.y} Q ${controlX} ${controlY} ${p2.x} ${p2.y}`;
+            path.setAttribute('d', d);
+            path.setAttribute('class', 'guide-line');
+            group.appendChild(path);
+            
+            // 텍스트 (편집 가능)
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', controlX);
+            text.setAttribute('y', controlY - 5);
+            text.setAttribute('class', 'guide-text');
+            text.setAttribute('text-anchor', 'middle');
+            text.textContent = `${distance.toFixed(1)}cm`;
+            text.style.cursor = 'pointer';
+            
+            // 텍스트 편집 기능
+            text.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const newText = prompt('길이를 입력하세요 (예: 12cm, 5.5m):', text.textContent);
+                if (newText !== null) {
+                    text.textContent = newText;
+                }
+            });
+            
+            group.appendChild(text);
+        }
+        
+        // 텍스트 가이드 생성
+        function createTextGuide(group, points) {
+            const p = points[0];
+            
+            const userText = prompt('텍스트를 입력하세요:', 'A');
+            if (userText === null) return;
+            
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', p.x);
+            text.setAttribute('y', p.y - 5);
+            text.setAttribute('class', 'guide-text');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', '16');
+            text.textContent = userText;
+            
+            // 텍스트 편집 기능
+            text.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const newText = prompt('텍스트를 수정하세요:', text.textContent);
+                if (newText !== null) {
+                    text.textContent = newText;
+                }
+            });
+            
+            group.appendChild(text);
+            
+            // 위치 표시 점
+            const marker = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            marker.setAttribute('cx', p.x);
+            marker.setAttribute('cy', p.y);
+            marker.setAttribute('r', 3);
+            marker.setAttribute('class', 'guide-marker');
+            group.appendChild(marker);
+        }
+        
+        // 각도 가이드 생성
+        function createAngleGuide(group, points) {
+            const p1 = points[0]; // 변1의 점
+            const vertex = points[1]; // 꼭지점
+            const p2 = points[2]; // 변2의 점
+            
+            // 벡터 계산
+            const v1x = p1.x - vertex.x;
+            const v1y = p1.y - vertex.y;
+            const v2x = p2.x - vertex.x;
+            const v2y = p2.y - vertex.y;
+            
+            // 각도 계산 (라디안)
+            const angle1 = Math.atan2(v1y, v1x);
+            const angle2 = Math.atan2(v2y, v2x);
+            let angleDiff = angle2 - angle1;
+            
+            // 각도를 0~2π 범위로 정규화
+            if (angleDiff < 0) angleDiff += 2 * Math.PI;
+            if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+            
+            const angleDegrees = (angleDiff * 180 / Math.PI).toFixed(1);
+            
+            // 내적으로 직각 확인
+            const dotProduct = v1x * v2x + v1y * v2y;
+            const isRightAngle = Math.abs(dotProduct) < 1;
+            
+            if (isRightAngle) {
+                // 직각 표시 (ㄱ 모양)
+                drawRightAngleMarkerForGuide(group, points);
+            } else {
+                // 호 그리기
+                const radius = 30;
+                const startAngle = angle1;
+                const endAngle = angle2;
+                
+                const arcPath = describeArc(vertex.x, vertex.y, radius, 
+                    startAngle * 180 / Math.PI, endAngle * 180 / Math.PI);
+                
+                const arc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                arc.setAttribute('d', arcPath);
+                arc.setAttribute('class', 'guide-angle-arc');
+                group.appendChild(arc);
+            }
+            
+            // 각도 텍스트
+            const textRadius = isRightAngle ? 20 : 40;
+            const textAngle = (angle1 + angle2) / 2;
+            const textX = vertex.x + Math.cos(textAngle) * textRadius;
+            const textY = vertex.y + Math.sin(textAngle) * textRadius;
+            
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', textX);
+            text.setAttribute('y', textY);
+            text.setAttribute('class', 'guide-text');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', '#9C27B0');
+            text.textContent = isRightAngle ? '90°' : `${angleDegrees}°`;
+            
+            // 텍스트 편집 기능
+            text.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const newText = prompt('각도를 입력하세요 (예: 45°, 90°):', text.textContent);
+                if (newText !== null) {
+                    text.textContent = newText;
+                }
+            });
+            
+            group.appendChild(text);
+        }
+        
+        // 가이드용 직각 마커 그리기
+        function drawRightAngleMarkerForGuide(group, points) {
+            const prev = points[0];
+            const current = points[1];
+            const next = points[2];
+            
+            const v1x = prev.x - current.x;
+            const v1y = prev.y - current.y;
+            const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
+            const u1x = v1x / len1;
+            const u1y = v1y / len1;
+            
+            const v2x = next.x - current.x;
+            const v2y = next.y - current.y;
+            const len2 = Math.sqrt(v2x * v2x + v2y * v2y);
+            const u2x = v2x / len2;
+            const u2y = v2y / len2;
+            
+            const markerSize = 15;
+            
+            const p1x = current.x + u1x * markerSize;
+            const p1y = current.y + u1y * markerSize;
+            const cornerX = current.x + u1x * markerSize + u2x * markerSize;
+            const cornerY = current.y + u1y * markerSize + u2y * markerSize;
+            const p2x = current.x + u2x * markerSize;
+            const p2y = current.y + u2y * markerSize;
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const d = `M ${p1x} ${p1y} L ${cornerX} ${cornerY} L ${p2x} ${p2y}`;
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', '#9C27B0');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            
+            group.appendChild(path);
+        }
+        
+        // 호 그리기 헬퍼 함수
+        function describeArc(x, y, radius, startAngle, endAngle) {
+            const start = polarToCartesian(x, y, radius, endAngle);
+            const end = polarToCartesian(x, y, radius, startAngle);
+            const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+            
+            return [
+                "M", start.x, start.y, 
+                "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+            ].join(" ");
+        }
+        
+        function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+            const angleInRadians = (angleInDegrees) * Math.PI / 180.0;
+            return {
+                x: centerX + (radius * Math.cos(angleInRadians)),
+                y: centerY + (radius * Math.sin(angleInRadians))
+            };
+        }
+        
+        // 마지막 도형 취소
+        function undoLast() {
+            if (isGuideMode) {
+                if (guidePoints.length > 0) {
+                    guidePoints.pop();
+                    updateTempGuides();
+                } else if (guides.length > 0) {
+                    const lastGuide = guides.pop();
+                    lastGuide.element.remove();
+                }
+            } else {
+                if (clickedPoints.length > 0) {
+                    clickedPoints.pop();
+                    updateTempShapes();
+                } else if (shapes.length > 0) {
+                    const lastShape = shapes.pop();
+                    lastShape.element.remove();
+                    updateLengthInfo();
+                }
+            }
+        }
+        
+        // 초기화
+        drawGrid();
+        updateButtons();
+        updateStyleButtons();
+        updateInstruction();
+    </script>
+</body>
+</html>

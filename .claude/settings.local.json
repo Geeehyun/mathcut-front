@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(timeout 5 npm run dev:*)",
+      "Bash(node --version:*)",
+      "Bash(python3:*)",
+      "Bash(/usr/bin/python3:*)",
+      "Bash(/c/Python312/python.exe:*)",
+      "Bash(cmd.exe /c \"python --version\")",
+      "Bash(cmd.exe /c \"cd /d D:\\\\vision\\\\docs && python -c \"\"import openpyxl; print\\(''ok''\\)\"\"\")",
+      "Bash(cmd.exe /c \"python -c \"\"import openpyxl; print\\(''ok''\\)\"\"\")",
+      "Bash(cmd.exe /c \"python -c \"\"print\\(''hello''\\)\"\" 2>&1\")",
+      "Bash(node -e:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
