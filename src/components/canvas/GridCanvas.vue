@@ -3338,7 +3338,7 @@ defineExpose({ exportImage })
       <!-- Shape layer -->
       <v-layer>
         <!-- Existing shapes -->
-        <template v-for="shape in canvasStore.shapes" :key="shape.id">
+        <template v-for="shape in canvasStore.shapes.filter((s) => s.visible !== false)" :key="shape.id">
           <template v-if="shape.type === 'point' || shape.type === 'point-on-object'">
             <v-circle
               @click="handleShapeNodeClick(shape.id, $event)"

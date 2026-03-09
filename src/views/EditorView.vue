@@ -342,9 +342,14 @@ const rightPanelOpen = ref(true)
 // 탭 전환
 const activeTab = ref<'info' | 'layer'>('info')
 const collapsedLayerGroups = ref<Record<string, boolean>>({})
+const draggedLayerShapeId = ref<string | null>(null)
+const dragOverLayerShapeId = ref<string | null>(null)
 
 const groupedLayers = computed(() => {
-  const rootShapes = canvasStore.shapes.filter((shape) => !shape.attachedToShapeId)
+  const rootShapes = canvasStore.shapes
+    .filter((shape) => !shape.attachedToShapeId)
+    .slice()
+    .reverse()
   return rootShapes.map((shape) => {
     const isOpenShape = shape.type === 'segment'
       || shape.type === 'ray'
@@ -427,10 +432,14 @@ const groupedLayers = computed(() => {
 
     const childShapes = canvasStore.shapes
       .filter((child) => child.attachedToShapeId === shape.id)
+      .slice()
+      .reverse()
       .map((child) => ({
         id: `shape-${child.id}`,
+        shapeId: child.id,
         icon: shapeIcons[child.type] ?? '•',
-        label: getShapeDisplayName(child)
+        label: getShapeDisplayName(child),
+        visible: child.visible !== false
       }))
 
     return {
@@ -438,6 +447,7 @@ const groupedLayers = computed(() => {
       shapeId: shape.id,
       icon: shapeIcons[shape.type] ?? '•',
       label: getShapeDisplayName(shape),
+      visible: shape.visible !== false,
       autoGuideItems: [...pointNameItems, ...lengthItems, ...angleItems, ...heightItems],
       guides,
       childShapes
@@ -448,6 +458,8 @@ const groupedLayers = computed(() => {
 const unboundGuides = computed(() => {
   return canvasStore.guides
     .filter(g => !g.shapeId)
+    .slice()
+    .reverse()
     .map((guide, index) => ({
       id: `guide-${guide.id}`,
       icon: guide.type === 'length' ? '📏' : guide.type === 'text' ? 'A' : '∠',
@@ -490,6 +502,106 @@ function toggleGuideVisibility(guideId: string, visible: boolean) {
 function selectGuideLayer(guideId: string) {
   canvasStore.selectGuide(guideId)
   activeTab.value = 'info'
+}
+
+function isShapeLayerSelected(shapeId: string): boolean {
+  return canvasStore.selectedShapeId === shapeId
+}
+
+function selectShapeLayer(shapeId: string) {
+  canvasStore.selectShape(shapeId)
+  activeTab.value = 'info'
+}
+
+function toggleShapeLayerVisibility(shapeId: string, visible: boolean) {
+  canvasStore.setShapeVisible(shapeId, !visible)
+}
+
+function getVisibilityIcon(visible: boolean): string {
+  return visible ? '👁' : '🙈'
+}
+
+function openShapeLayerContextMenu(e: MouseEvent, shapeId: string) {
+  e.preventDefault()
+  contextmenuState.value = {
+    visible: true,
+    x: e.clientX,
+    y: e.clientY,
+    target: { kind: 'shape', shapeId }
+  }
+}
+
+function openShapeGuideItemContextMenu(
+  e: MouseEvent,
+  shapeId: string,
+  key: 'length' | 'angle' | 'pointName' | 'height',
+  index: number
+) {
+  e.preventDefault()
+  contextmenuState.value = {
+    visible: true,
+    x: e.clientX,
+    y: e.clientY,
+    target: { kind: 'shape-guide-item', shapeId, guideKey: key, itemIndex: index }
+  }
+}
+
+function openGuideLayerContextMenu(e: MouseEvent, guideId: string) {
+  e.preventDefault()
+  contextmenuState.value = {
+    visible: true,
+    x: e.clientX,
+    y: e.clientY,
+    target: { kind: 'guide', guideId }
+  }
+}
+
+function handleLayerDragStart(shapeId: string, e: DragEvent) {
+  draggedLayerShapeId.value = shapeId
+  dragOverLayerShapeId.value = shapeId
+  e.dataTransfer?.setData('text/plain', shapeId)
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function handleLayerDragOver(shapeId: string, e: DragEvent) {
+  if (!draggedLayerShapeId.value) return
+  e.preventDefault()
+  dragOverLayerShapeId.value = shapeId
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function handleLayerDrop(targetShapeId: string, e: DragEvent) {
+  e.preventDefault()
+  const draggedId = draggedLayerShapeId.value
+  draggedLayerShapeId.value = null
+  dragOverLayerShapeId.value = null
+  if (!draggedId || draggedId === targetShapeId) return
+
+  const fromIndex = canvasStore.shapes.findIndex((shape) => shape.id === draggedId)
+  const targetIndex = canvasStore.shapes.findIndex((shape) => shape.id === targetShapeId)
+  if (fromIndex === -1 || targetIndex === -1) return
+
+  // Drop target 기준 "앞"으로 삽입
+  const toIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex
+  canvasStore.moveShapeToIndex(draggedId, toIndex)
+}
+
+function handleLayerDragEnd() {
+  draggedLayerShapeId.value = null
+  dragOverLayerShapeId.value = null
+}
+
+function handleLayerTrashDrop(e: DragEvent) {
+  e.preventDefault()
+  const shapeId = draggedLayerShapeId.value
+  draggedLayerShapeId.value = null
+  dragOverLayerShapeId.value = null
+  if (!shapeId) return
+  canvasStore.removeShape(shapeId)
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -680,7 +792,7 @@ onUnmounted(() => {
           </div>
 
           <!-- ?덉씠????-->
-          <div v-if="activeTab === 'layer'" class="flex-1 overflow-y-auto p-3">
+          <div v-if="activeTab === 'layer'" class="relative flex-1 overflow-y-auto p-3 pb-20">
             <div v-if="groupedLayers.length === 0 && unboundGuides.length === 0" class="text-sm text-gray-400 text-center py-8">
               도형/가이드를 추가하면<br>여기에 표시됩니다
             </div>
@@ -688,23 +800,41 @@ onUnmounted(() => {
               <div
                 v-for="group in groupedLayers"
                 :key="group.id"
-                class="rounded-lg border border-gray-200 bg-white"
+                class="rounded-lg border bg-white"
+                :class="[
+                  isShapeLayerSelected(group.shapeId) ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200',
+                  dragOverLayerShapeId === group.shapeId ? 'ring-2 ring-orange-200 border-orange-300' : ''
+                ]"
+                draggable="true"
+                @dragstart="handleLayerDragStart(group.shapeId, $event)"
+                @dragover="handleLayerDragOver(group.shapeId, $event)"
+                @drop="handleLayerDrop(group.shapeId, $event)"
+                @dragend="handleLayerDragEnd"
+                @contextmenu="openShapeLayerContextMenu($event, group.shapeId)"
               >
-                <button
-                  class="w-full flex items-center gap-2 px-2.5 py-1.5 bg-gray-50 text-sm text-left"
+                <div
+                  class="w-full flex items-center gap-2 px-2.5 py-1.5 bg-gray-50 text-sm text-left cursor-pointer"
                   :class="isLayerCollapsed(group.id) ? 'rounded-lg' : 'rounded-t-lg'"
-                  @click="toggleLayerCollapsed(group.id)"
+                  @click="selectShapeLayer(group.shapeId)"
                 >
-                  <span class="text-xs text-gray-400">{{ isLayerCollapsed(group.id) ? '▶' : '▼' }}</span>
+                  <button
+                    class="text-xs text-gray-400 w-5 h-5 rounded hover:bg-gray-100"
+                    @click.stop="toggleLayerCollapsed(group.id)"
+                  >
+                    {{ isLayerCollapsed(group.id) ? '▶' : '▼' }}
+                  </button>
                   <span class="text-base leading-none">{{ group.icon }}</span>
                   <span class="text-gray-700 truncate font-medium">{{ group.label }}</span>
+                  <button class="eye-btn ml-auto" @click.stop="toggleShapeLayerVisibility(group.shapeId, group.visible)" :title="group.visible ? '숨김' : '표시'">
+                    {{ getVisibilityIcon(group.visible) }}
+                  </button>
                   <span
                     v-if="isLayerCollapsed(group.id) && (group.childShapes.length + group.autoGuideItems.length + group.guides.length > 0)"
-                    class="ml-auto text-[11px] text-gray-400"
+                    class="text-[11px] text-gray-400"
                   >
                     {{ group.childShapes.length + group.autoGuideItems.length + group.guides.length }}개
                   </span>
-                </button>
+                </div>
                 <div
                   v-if="!isLayerCollapsed(group.id) && (group.childShapes.length || group.autoGuideItems.length || group.guides.length)"
                   class="ml-4 pl-2 py-1 border-l-2 border-orange-200 space-y-1"
@@ -712,20 +842,27 @@ onUnmounted(() => {
                   <div
                     v-for="child in group.childShapes"
                     :key="child.id"
-                    class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-blue-50/60 text-gray-700"
+                    class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-blue-50/60 text-gray-700 cursor-pointer"
+                    :class="isShapeLayerSelected(child.shapeId) ? 'ring-1 ring-blue-300' : ''"
+                    @click="selectShapeLayer(child.shapeId)"
+                    @contextmenu="openShapeLayerContextMenu($event, child.shapeId)"
                   >
                     <span class="text-base leading-none">{{ child.icon }}</span>
-                    <span class="truncate">{{ child.label }}</span>
+                    <span class="truncate flex-1">{{ child.label }}</span>
+                    <button class="eye-btn" @click.stop="toggleShapeLayerVisibility(child.shapeId, child.visible)" :title="child.visible ? '숨김' : '표시'">
+                      {{ getVisibilityIcon(child.visible) }}
+                    </button>
                   </div>
                   <div
                     v-for="item in group.autoGuideItems"
                     :key="item.id"
                     class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-gray-50 text-gray-700"
+                    @contextmenu="openShapeGuideItemContextMenu($event, group.shapeId, item.key, item.index)"
                   >
                     <span class="text-base leading-none">{{ item.icon }}</span>
                     <span class="truncate flex-1">{{ item.label }}</span>
                     <button class="eye-btn" @click.stop="toggleShapeGuideVisibility(group.shapeId, item.key, item.index, item.visible)">
-                      {{ item.visible ? '숨김' : '표시' }}
+                      {{ getVisibilityIcon(item.visible) }}
                     </button>
                   </div>
                   <div
@@ -733,11 +870,12 @@ onUnmounted(() => {
                     :key="guide.id"
                     class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700 cursor-pointer hover:bg-orange-100/70"
                     @click="selectGuideLayer(guide.guideId)"
+                    @contextmenu="openGuideLayerContextMenu($event, guide.guideId)"
                   >
                     <span class="text-base leading-none">{{ guide.icon }}</span>
                     <span class="truncate flex-1">{{ guide.label }}</span>
                     <button class="eye-btn" @click.stop="toggleGuideVisibility(guide.guideId, guide.visible)">
-                      {{ guide.visible ? '숨김' : '표시' }}
+                      {{ getVisibilityIcon(guide.visible) }}
                     </button>
                   </div>
                 </div>
@@ -750,13 +888,28 @@ onUnmounted(() => {
                   :key="guide.id"
                   class="flex items-center gap-2 px-2 py-1 rounded-md text-sm bg-orange-50/60 text-gray-700 cursor-pointer hover:bg-orange-100/70"
                   @click="selectGuideLayer(guide.guideId)"
+                  @contextmenu="openGuideLayerContextMenu($event, guide.guideId)"
                 >
                   <span class="text-base leading-none">{{ guide.icon }}</span>
                   <span class="truncate flex-1">{{ guide.label }}</span>
                   <button class="eye-btn" @click.stop="toggleGuideVisibility(guide.guideId, guide.visible)">
-                    {{ guide.visible ? '숨김' : '표시' }}
+                    {{ getVisibilityIcon(guide.visible) }}
                   </button>
                 </div>
+              </div>
+            </div>
+
+            <div
+              v-if="draggedLayerShapeId"
+              class="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-3 z-20"
+            >
+              <div
+                class="pointer-events-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-red-300 bg-red-50 text-red-600 shadow"
+                @dragover.prevent
+                @drop="handleLayerTrashDrop($event)"
+              >
+                <span class="text-lg leading-none">🗑</span>
+                <span class="text-xs font-medium">여기에 놓으면 레이어 삭제</span>
               </div>
             </div>
           </div>
@@ -770,7 +923,7 @@ onUnmounted(() => {
           :style="{ right: rightPanelOpen ? '256px' : '0' }"
           @click="rightPanelOpen = !rightPanelOpen"
           :title="rightPanelOpen ? '패널 닫기' : '패널 열기'"
-        >{{ rightPanelOpen ? '◀' : '▶' }}</button>
+        >{{ rightPanelOpen ? '▶' : '◀' }}</button>
 
       </div>
     </div>

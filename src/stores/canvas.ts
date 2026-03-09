@@ -173,6 +173,28 @@ export const useCanvasStore = defineStore('canvas', () => {
     shapes.value[index] = withCircleOppositePoint(updater(shapes.value[index]))
   }
 
+  function setShapeVisible(id: string, visible: boolean) {
+    const index = shapes.value.findIndex(s => s.id === id)
+    if (index === -1) return
+    saveHistory()
+    shapes.value[index] = {
+      ...shapes.value[index],
+      visible
+    }
+  }
+
+  function moveShapeToIndex(id: string, toIndex: number) {
+    const fromIndex = shapes.value.findIndex((s) => s.id === id)
+    if (fromIndex === -1) return
+    const clampedTo = Math.max(0, Math.min(shapes.value.length - 1, toIndex))
+    if (fromIndex === clampedTo) return
+    saveHistory()
+    const next = [...shapes.value]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(clampedTo, 0, moved)
+    shapes.value = next
+  }
+
   function setShapePoint(id: string, pointIndex: number, point: { x: number, y: number, gridX: number, gridY: number }, recordHistory: boolean = true) {
     const index = shapes.value.findIndex(s => s.id === id)
     if (index === -1) return
@@ -395,6 +417,8 @@ export const useCanvasStore = defineStore('canvas', () => {
     setShapeGuideItemVisible,
     reorderShape,
     updateShape,
+    setShapeVisible,
+    moveShapeToIndex,
     removeLastShape,
     addGuide,
     updateGuide,

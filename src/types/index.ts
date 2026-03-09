@@ -80,6 +80,7 @@ export interface Shape {
   id: string
   type: ShapeType
   points: Point[]
+  visible?: boolean
   circleMeasureMode?: 'radius' | 'diameter'
   pointLabels?: string[]
   pointLabelLatex?: boolean[]
