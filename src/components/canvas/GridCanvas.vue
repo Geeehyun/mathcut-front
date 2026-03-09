@@ -23,6 +23,7 @@ import {
   computeRectangle,
   computeRhombus,
   computeParallelogram,
+  computeTrapezoidFromThreePoints,
   computeRegularPolygon
 } from '@/utils/geometry'
 import { GRID_CONFIG, STYLE_COLORS } from '@/types'
@@ -2724,6 +2725,9 @@ function getPreviewPoints(): Point[] {
   }
   if (shapeType === 'rect-parallelogram' && points.length >= 3) {
     return [points[0], points[1], computeParallelogram(points[0], points[1], points[2]), points[2]]
+  }
+  if (shapeType === 'rect-trapezoid' && points.length >= 3) {
+    return computeTrapezoidFromThreePoints(points[0], points[1], points[2])
   }
   if (shapeType === 'polygon-regular' && points.length >= 2) {
     return computeRegularPolygon(points[0], points[1], toolStore.polygonSides)

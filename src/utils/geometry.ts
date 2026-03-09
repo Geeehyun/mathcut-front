@@ -418,6 +418,39 @@ export function computeParallelogram(p1: Point, p2: Point, p3: Point): Point {
 }
 
 /**
+ * 사다리꼴(이등변 기준): 3점 → 4번째 꼭짓점 계산
+ * p1-p2를 밑변으로 두고, p3를 윗변의 한 꼭짓점으로 사용한다.
+ * p3를 밑변 축으로 분해한 뒤, 축 좌표를 밑변 중앙 기준 대칭시켜 p4를 만든다.
+ * 반환: [p1, p2, p4, p3] (시계 방향)
+ */
+export function computeTrapezoidFromThreePoints(p1: Point, p2: Point, p3: Point): [Point, Point, Point, Point] {
+  const bx = p2.x - p1.x
+  const by = p2.y - p1.y
+  const len = Math.hypot(bx, by)
+  if (len < 1e-6) {
+    return [p1, p2, p3, p3]
+  }
+
+  const ux = bx / len
+  const uy = by / len
+  const nx = -uy
+  const ny = ux
+
+  const vx = p3.x - p1.x
+  const vy = p3.y - p1.y
+  const t = vx * ux + vy * uy
+  const h = vx * nx + vy * ny
+
+  const tMirror = len - t
+  const p4 = makePoint(
+    p1.x + ux * tMirror + nx * h,
+    p1.y + uy * tMirror + ny * h
+  )
+
+  return [p1, p2, p4, p3]
+}
+
+/**
  * 정다각형: 중심점 + 한 꼭짓점 → 전체 꼭짓점 배열
  */
 export function computeRegularPolygon(center: Point, vertex: Point, n: number): Point[] {

@@ -13,6 +13,7 @@ import {
   computeRectangle,
   computeRhombus,
   computeParallelogram,
+  computeTrapezoidFromThreePoints,
   computeRegularPolygon
 } from '@/utils/geometry'
 import type { Point, Shape } from '@/types'
@@ -88,7 +89,7 @@ export function useShape() {
       'triangle-free': 3,
       'rect-square': 2,
       'rect-rectangle': 2,
-      'rect-trapezoid': 4,
+      'rect-trapezoid': 3,
       'rect-rhombus': 2,
       'rect-parallelogram': 3,
       'rect-free': 4,
@@ -132,6 +133,8 @@ export function useShape() {
       points = computeRhombus(tempPoints[0], tempPoints[1])
     } else if (shapeType === 'rect-parallelogram' && tempPoints.length >= 3) {
       points = [tempPoints[0], tempPoints[1], computeParallelogram(tempPoints[0], tempPoints[1], tempPoints[2]), tempPoints[2]]
+    } else if (shapeType === 'rect-trapezoid' && tempPoints.length >= 3) {
+      points = computeTrapezoidFromThreePoints(tempPoints[0], tempPoints[1], tempPoints[2])
     } else if (shapeType === 'polygon-regular' && tempPoints.length >= 2) {
       points = computeRegularPolygon(tempPoints[0], tempPoints[1], toolStore.polygonSides)
     }

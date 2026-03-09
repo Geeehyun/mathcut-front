@@ -117,7 +117,7 @@ const shapeInstructions: Partial<Record<ShapeType, string>> = {
   'triangle-free': '세 개의 점을 클릭하세요',
   'rect-square': '한 변의 두 점을 클릭하세요',
   'rect-rectangle': '대각선의 두 점을 클릭하세요',
-  'rect-trapezoid': '네 점을 클릭하세요',
+  'rect-trapezoid': '밑변의 두 점을 찍고 세 번째 점으로 윗변을 정하세요',
   'rect-rhombus': '네 점을 클릭하세요',
   'rect-parallelogram': '네 점을 클릭하세요',
   'rect-free': '네 개의 점을 클릭하세요',
