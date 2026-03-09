@@ -52,6 +52,11 @@ const selectedShape = computed(() => canvasStore.selectedShape)
 const hasSelection = computed(() => !!selectedShape.value)
 const isStandalonePointSelection = computed(() => selectedShape.value?.type === 'point' || selectedShape.value?.type === 'point-on-object')
 const isArrowSelection = computed(() => selectedShape.value?.type === 'arrow' || selectedShape.value?.type === 'arrow-curve')
+const isLineSelection = computed(() => {
+  const type = selectedShape.value?.type
+  return type === 'segment' || type === 'ray' || type === 'line'
+})
+const isAngleLineSelection = computed(() => selectedShape.value?.type === 'angle-line')
 const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'])
 
 type GuideToggleKey = 'length' | 'radius' | 'angle' | 'pointName' | 'point' | 'height'
@@ -185,11 +190,15 @@ function isShapePointDefaultVisible(shape: Shape): boolean {
 
 function isShapeGuideAvailable(shape: Shape | null, key: GuideToggleKey): boolean {
   if (!shape) return true
-  if (key === 'length') return shape.type !== 'circle' && shape.type !== 'arrow' && shape.type !== 'arrow-curve'
+  if (key === 'length') {
+    if (shape.type === 'segment' || shape.type === 'ray' || shape.type === 'line') return true
+    return shape.type !== 'circle' && shape.type !== 'arrow' && shape.type !== 'arrow-curve' && shape.type !== 'angle-line'
+  }
   if (key === 'radius') return shape.type === 'circle'
   if (key === 'pointName') return true
   if (key === 'point') return true
   if (key === 'angle') {
+    if (shape.type === 'angle-line') return shape.points.length >= 3
     return shape.type !== 'circle' && !openShapeTypes.has(shape.type) && shape.points.length >= 3
   }
   if (key === 'height') {
@@ -472,7 +481,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
         <div v-if="selectedMetrics.perimeter !== null" class="info-row"><span class="info-key">둘레</span><span class="info-value">{{ formatLength(selectedMetrics.perimeter) }}</span></div>
         <div v-if="selectedMetrics.area !== null" class="info-row"><span class="info-key">넓이</span><span class="info-value">{{ formatArea(selectedMetrics.area) }}</span></div>
         <div v-if="!isStandalonePointSelection" class="info-row"><span class="info-key">테두리</span><span class="color-chip" :title="getColorChipTitle(selectedStroke)" :style="{ backgroundColor: selectedStroke === 'none' ? 'transparent' : selectedStroke }"></span></div>
-        <div v-if="!isStandalonePointSelection" class="info-row"><span class="info-key">배경색</span><span class="color-chip" :title="getColorChipTitle(selectedFill)" :style="{ backgroundColor: selectedFill === FILL_NONE ? 'transparent' : selectedFill }"></span></div>
+        <div v-if="!isStandalonePointSelection && !isLineSelection && !isAngleLineSelection" class="info-row"><span class="info-key">배경색</span><span class="color-chip" :title="getColorChipTitle(selectedFill)" :style="{ backgroundColor: selectedFill === FILL_NONE ? 'transparent' : selectedFill }"></span></div>
         <div class="info-row"><span class="info-key">점</span><span class="color-chip" :title="getColorChipTitle(selectedPoint)" :style="{ backgroundColor: selectedPoint }"></span></div>
       </div>
       <div class="space-y-1.5 max-h-28 overflow-y-auto">
@@ -511,7 +520,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
     <section class="panel-section">
       <h4 class="panel-title">색상 변경</h4>
       <div v-if="hasSelection" class="space-y-2">
-        <div v-if="selectedPointVisible && !isArrowSelection">
+        <div v-if="!isArrowSelection && (selectedPointVisible || isLineSelection || isAngleLineSelection)">
           <p class="text-xs text-gray-500 mb-1">점 색상</p>
           <div class="flex items-center flex-wrap gap-1.5">
             <button v-for="color in STROKE_PALETTE" :key="`point-${color.id}`" class="w-5 h-5 rounded-full border hover:scale-110 transition" :class="selectedPoint === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setPointColor(color.hex)"></button>
@@ -524,7 +533,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
             <button class="action-btn text-xs px-2 py-1" :class="{ active: selectedStroke === 'none' }" @click="setStrokeColor('none')">없음</button>
           </div>
         </div>
-        <div v-if="!isStandalonePointSelection && !isArrowSelection">
+        <div v-if="!isStandalonePointSelection && !isArrowSelection && !isLineSelection && !isAngleLineSelection">
           <p class="text-xs text-gray-500 mb-1">채우기 색상</p>
           <div class="flex items-center flex-wrap gap-1.5">
             <button v-for="color in FILL_PALETTE" :key="color.id" class="w-5 h-5 rounded-full border hover:scale-110 transition" :class="selectedFill === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setFillColor(color.hex)"></button>
@@ -577,8 +586,8 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
           <button class="action-btn text-xs px-2 py-1" :class="{ active: selectedCircleMeasureMode === 'diameter' }" @click="setSelectedCircleMeasureMode('diameter')">지름</button>
         </div>
         <label v-if="isShapeGuideAvailable(selectedShape, 'angle')" class="toggle-row"><span>각도</span><button class="guide-toggle-btn" @click="hasSelection ? toggleSelectedGuide('angle') : toggleGlobalGuide('angle')">{{ hasSelection ? getSelectedGuideIndicator('angle') : getGlobalGuideIndicator('angle') }}</button></label>
-        <div v-if="isShapeGuideAvailable(selectedShape, 'angle')" class="text-xs text-gray-500">각도 자동 표시</div>
-        <div v-if="isShapeGuideAvailable(selectedShape, 'angle')" class="grid grid-cols-2 gap-2">
+        <div v-if="isShapeGuideAvailable(selectedShape, 'angle') && !isAngleLineSelection" class="text-xs text-gray-500">각도 자동 표시</div>
+        <div v-if="isShapeGuideAvailable(selectedShape, 'angle') && !isAngleLineSelection" class="grid grid-cols-2 gap-2">
           <button class="action-btn text-xs px-2 py-1" :class="{ active: toolStore.angleDisplayMode === 'right' }" @click="toolStore.setAngleDisplayMode('right')">직각만</button>
           <button class="action-btn text-xs px-2 py-1" :class="{ active: toolStore.angleDisplayMode === 'all' }" @click="toolStore.setAngleDisplayMode('all')">모든 각</button>
         </div>

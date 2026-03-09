@@ -1101,11 +1101,24 @@ function getShapeCentroid(points: { x: number, y: number }[]): { x: number, y: n
 }
 
 function getShapeAutoAngleIndices(shape: Shape): number[] {
+  if (shape.type === 'angle-line') {
+    return shape.points.length >= 3 ? [1] : []
+  }
   if (shape.type === 'circle' || openShapeTypes.has(shape.type) || shape.points.length < 3) return []
   if (toolStore.angleDisplayMode === 'all') {
     return shape.points.map((_, index) => index)
   }
   return findRightAngles(shape.points)
+}
+
+function getShapeAutoLengthIndices(shape: Shape): number[] {
+  if (shape.type === 'circle' || shape.type === 'arrow' || shape.type === 'arrow-curve' || shape.type === 'angle-line') {
+    return []
+  }
+  if (shape.type === 'segment' || shape.type === 'ray' || shape.type === 'line') {
+    return shape.points.length >= 2 ? [0] : []
+  }
+  return shape.points.map((_, index) => index)
 }
 
 function getShapeAngleTriplet(shape: Shape, index: number): { prev: Point, vertex: Point, next: Point } | null {
@@ -2656,8 +2669,8 @@ defineExpose({ exportImage })
             />
             <!-- 변 길이: 점-점 점선 곡선 + 길이 텍스트 -->
             <template
-              v-if="toolStore.showLength && isShapeGuideVisible(shape, 'length') && !openShapeTypes.has(shape.type)"
-              v-for="(_, pIndex) in shape.points"
+              v-if="toolStore.showLength && isShapeGuideVisible(shape, 'length')"
+              v-for="pIndex in getShapeAutoLengthIndices(shape)"
               :key="`${shape.id}-length-${pIndex}`"
             >
               <v-line
@@ -2867,7 +2880,7 @@ defineExpose({ exportImage })
             </template>
             <template v-for="angleIndex in getShapeAutoAngleIndices(shape)" :key="`${shape.id}-angle-${angleIndex}`">
               <v-line
-                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !openShapeTypes.has(shape.type) && isRightAngleAt(shape, angleIndex)"
+                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isRightAngleAt(shape, angleIndex)"
                 :config="{
                   points: (() => {
                     const marker = getRightAngleMarkerPoints(shape.points, angleIndex, RIGHT_ANGLE_MARKER_SIZE)
@@ -2879,7 +2892,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
               <v-line
-                v-if="toolStore.showAngle && toolStore.angleDisplayMode === 'all' && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !openShapeTypes.has(shape.type) && !isRightAngleAt(shape, angleIndex)"
+                v-if="toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isRightAngleAt(shape, angleIndex)"
                 :config="{
                   points: getShapeAngleArcPolyline(shape, angleIndex),
                   stroke: getShapeGuideItemStyle(shape, 'angle', angleIndex).lineColor || getShapeGuideItemStyle(shape, 'angle', angleIndex).color || ANGLE_GUIDE_DEFAULT_COLOR,
@@ -2888,7 +2901,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
               <v-rect
-                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !openShapeTypes.has(shape.type) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeGuideBlankRect(shape, 'angle', angleIndex).x,
                   y: getShapeGuideBlankRect(shape, 'angle', angleIndex).y,
@@ -2909,7 +2922,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
               <v-text
-                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !openShapeTypes.has(shape.type) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeGuideBlankSuffixPos(shape, 'angle', angleIndex).x - 3,
                   y: getShapeGuideBlankSuffixPos(shape, 'angle', angleIndex).y - 3,
@@ -2922,7 +2935,7 @@ defineExpose({ exportImage })
                 }"
               />
               <v-text
-                v-if="toolStore.showAngle && toolStore.angleDisplayMode === 'all' && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !openShapeTypes.has(shape.type) && !isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isShapeGuideItemBlank(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeAngleLabelPos(shape, angleIndex).x + getShapeGuideItemOffset(shape, 'angle', angleIndex).x,
                   y: getShapeAngleLabelPos(shape, angleIndex).y + getShapeGuideItemOffset(shape, 'angle', angleIndex).y,

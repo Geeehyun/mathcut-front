@@ -79,6 +79,11 @@ const isGuideTarget = computed(() => props.target?.kind === 'guide')
 const isShapeGuideItemTarget = computed(() => props.target?.kind === 'shape-guide-item')
 const isStandalonePointTarget = computed(() => targetShape.value?.type === 'point' || targetShape.value?.type === 'point-on-object')
 const isArrowTarget = computed(() => targetShape.value?.type === 'arrow' || targetShape.value?.type === 'arrow-curve')
+const isLineTarget = computed(() => {
+  const type = targetShape.value?.type
+  return type === 'segment' || type === 'ray' || type === 'line'
+})
+const isAngleLineTarget = computed(() => targetShape.value?.type === 'angle-line')
 
 const shapeTypeNames: Record<string, string> = {
   rectangle: '사각형',
@@ -244,7 +249,7 @@ const selectedStrokeWidthPt = computed(() => {
 })
 
 const shapeGuideVisibility = computed(() => ({
-  length: targetShape.value?.type === 'circle' || targetShape.value?.type === 'arrow' || targetShape.value?.type === 'arrow-curve'
+  length: targetShape.value?.type === 'circle' || targetShape.value?.type === 'arrow' || targetShape.value?.type === 'arrow-curve' || targetShape.value?.type === 'angle-line'
     ? false
     : targetShape.value?.guideVisibility?.length !== false,
   radius: targetShape.value?.type === 'circle'
@@ -391,7 +396,24 @@ function setShapeStrokeWidthPt(widthPt: number) {
 
 function setShapeGuideVisible(key: 'length' | 'radius' | 'angle' | 'pointName' | 'height' | 'point', visible: boolean) {
   if (!targetShape.value) return
-  canvasStore.setShapeGuideVisibility(targetShape.value.id, key, visible)
+  canvasStore.updateShape(targetShape.value.id, (shape) => {
+    const nextVisibility = { ...(shape.guideVisibility || {}), [key]: visible }
+    if (visible) {
+      if (key === 'length' || key === 'radius') {
+        nextVisibility.lengthHiddenIndices = []
+      } else if (key === 'angle') {
+        nextVisibility.angleHiddenIndices = []
+      } else if (key === 'pointName') {
+        nextVisibility.pointNameHiddenIndices = []
+      } else if (key === 'height') {
+        nextVisibility.heightHiddenIndices = []
+      }
+    }
+    return {
+      ...shape,
+      guideVisibility: nextVisibility
+    }
+  })
 }
 
 function cycleHeightBaseEdge(step: -1 | 1) {
@@ -636,6 +658,29 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
+          <template v-else-if="isLineTarget || isAngleLineTarget">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">선 색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="color.id" class="w-5 h-5 rounded-full border transition hover:scale-110" :class="selectedStroke === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="updateColor({ stroke: color.hex })"></button>
+                <button class="px-1.5 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-50" :class="selectedStroke === 'none' ? 'ring-2 ring-blue-500' : ''" title="선 없음" @click="updateColor({ stroke: 'none' })">없음</button>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">점 색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="`point-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :class="selectedPoint === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="updateColor({ point: color.hex })"></button>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">선 굵기 (pt)</p>
+              <div class="flex items-center gap-1">
+                <button class="px-2 py-0.5 border rounded" @click="setShapeStrokeWidthPt(selectedStrokeWidthPt - STROKE_WIDTH_STEP_PT)">-</button>
+                <span class="text-xs w-10 text-center">{{ selectedStrokeWidthPt.toFixed(1) }}</span>
+                <button class="px-2 py-0.5 border rounded" @click="setShapeStrokeWidthPt(selectedStrokeWidthPt + STROKE_WIDTH_STEP_PT)">+</button>
+              </div>
+            </div>
+          </template>
           <template v-else>
             <div>
               <p class="text-xs text-gray-500 mb-1">선 색상</p>
@@ -676,7 +721,7 @@ onUnmounted(() => {
         </button>
 
         <div v-if="expandedGuidePanel" class="px-2 py-2 space-y-1.5">
-          <div v-if="!isStandalonePointTarget && targetShape?.type !== 'circle' && targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve'" class="flex items-center justify-between text-xs">
+          <div v-if="!isStandalonePointTarget && (isLineTarget || (!isAngleLineTarget && targetShape?.type !== 'circle' && targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve'))" class="flex items-center justify-between text-xs">
             <span class="text-gray-600">길이</span>
             <button class="eye-btn" @click="setShapeGuideVisible('length', !shapeGuideVisibility.length)">{{ shapeGuideVisibility.length ? '숨김' : '표시' }}</button>
           </div>
@@ -688,7 +733,7 @@ onUnmounted(() => {
             <button class="px-2 py-0.5 border rounded text-xs" :class="selectedCircleMeasureMode === 'radius' ? 'bg-blue-50 border-blue-400 text-blue-700' : ''" @click="setCircleMeasureMode('radius')">반지름</button>
             <button class="px-2 py-0.5 border rounded text-xs" :class="selectedCircleMeasureMode === 'diameter' ? 'bg-blue-50 border-blue-400 text-blue-700' : ''" @click="setCircleMeasureMode('diameter')">지름</button>
           </div>
-          <div v-if="!isStandalonePointTarget && targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve'" class="flex items-center justify-between text-xs">
+          <div v-if="!isStandalonePointTarget && (isAngleLineTarget || (targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve' && targetShape?.type !== 'circle' && !isLineTarget))" class="flex items-center justify-between text-xs">
             <span class="text-gray-600">각도</span>
             <button class="eye-btn" @click="setShapeGuideVisible('angle', !shapeGuideVisibility.angle)">{{ shapeGuideVisibility.angle ? '숨김' : '표시' }}</button>
           </div>
@@ -700,7 +745,7 @@ onUnmounted(() => {
             <span class="text-gray-600">점</span>
             <button class="eye-btn" @click="setShapeGuideVisible('point', !shapeGuideVisibility.point)">{{ shapeGuideVisibility.point ? '숨김' : '표시' }}</button>
           </div>
-          <div v-if="!isStandalonePointTarget && targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve' && isHeightGuideToggleVisible" class="flex items-center justify-between text-xs">
+          <div v-if="!isStandalonePointTarget && !isLineTarget && !isAngleLineTarget && targetShape?.type !== 'arrow' && targetShape?.type !== 'arrow-curve' && isHeightGuideToggleVisible" class="flex items-center justify-between text-xs">
             <span class="text-gray-600">높이</span>
             <button class="eye-btn" @click="setShapeGuideVisible('height', !shapeGuideVisibility.height)">{{ shapeGuideVisibility.height ? '숨김' : '표시' }}</button>
           </div>

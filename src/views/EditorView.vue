@@ -252,12 +252,14 @@ function isShapeHeightDefaultVisible(shape: Shape): boolean {
 }
 
 function getShapeAngleIndices(shape: Shape): number[] {
+  if (shape.type === 'angle-line') {
+    return shape.points.length >= 3 ? [1] : []
+  }
   const isOpenShape = shape.type === 'segment'
     || shape.type === 'ray'
     || shape.type === 'line'
     || shape.type === 'arrow'
     || shape.type === 'arrow-curve'
-    || shape.type === 'angle-line'
   if (shape.type === 'circle' || isOpenShape || shape.points.length < 3) return []
   if (toolStore.angleDisplayMode === 'all') return shape.points.map((_, index) => index)
   return findRightAngles(shape.points)
@@ -370,14 +372,21 @@ const groupedLayers = computed(() => {
         index: 0,
         visible: isShapeGuideItemVisibleInLayer(shape, 'length', 0)
       }]
-      : (!isOpenShape ? shape.points.map((_, pIndex) => ({
+      : ((shape.type === 'segment' || shape.type === 'ray' || shape.type === 'line') ? [{
+        id: `auto-length-${shape.id}-0`,
+        icon: '📏',
+        label: getLengthLabel(shape, 0),
+        key: 'length' as const,
+        index: 0,
+        visible: isShapeGuideItemVisibleInLayer(shape, 'length', 0)
+      }] : (!isOpenShape ? shape.points.map((_, pIndex) => ({
         id: `auto-length-${shape.id}-${pIndex}`,
         icon: '📏',
         label: getLengthLabel(shape, pIndex),
         key: 'length' as const,
         index: pIndex,
         visible: isShapeGuideItemVisibleInLayer(shape, 'length', pIndex)
-      })) : [])
+      })) : []))
 
     const angleItems = getShapeAngleIndices(shape).map((aIndex) => ({
       id: `auto-angle-${shape.id}-${aIndex}`,
@@ -450,9 +459,19 @@ function toggleLayerCollapsed(groupId: string) {
 }
 
 function toggleShapeGuideVisibility(shapeId: string, key: 'length' | 'angle' | 'pointName' | 'height', index: number, visible: boolean) {
+  const shape = canvasStore.shapes.find((s) => s.id === shapeId)
+  if (!shape) return
   if (key === 'height') {
     canvasStore.setShapeGuideVisibility(shapeId, 'height', !visible)
     return
+  }
+  // 기본 가시성(boolean)이 꺼진 상태에서도 레이어 개별 토글로 바로 표시되도록 동기화
+  if (!visible) {
+    if (key === 'length') {
+      canvasStore.setShapeGuideVisibility(shapeId, shape.type === 'circle' ? 'radius' : 'length', true)
+    } else {
+      canvasStore.setShapeGuideVisibility(shapeId, key, true)
+    }
   }
   canvasStore.setShapeGuideItemVisible(shapeId, key, index, !visible)
 }

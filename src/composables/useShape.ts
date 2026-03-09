@@ -159,6 +159,7 @@ export function useShape() {
       },
       strokeWidthPt: isArrowType ? 0.5 : undefined,
       guideVisibility: {
+        length: normalizedType === 'ray' || normalizedType === 'line' ? false : undefined,
         height: defaultHeightVisibleTypes.has(normalizedType),
         point: isArrowType ? false : undefined
       },
