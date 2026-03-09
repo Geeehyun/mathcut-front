@@ -2075,8 +2075,9 @@ function getArrowHeadPointsByTangent(from: { x: number, y: number }, tip: { x: n
   const uy = vy / len
   const px = -uy
   const py = ux
-  const headLength = 14
+  const headLength = 15
   const headHalfWidth = 7
+  const notchDepth = 6
   const left = {
     x: tip.x - ux * headLength + px * headHalfWidth,
     y: tip.y - uy * headLength + py * headHalfWidth
@@ -2085,7 +2086,12 @@ function getArrowHeadPointsByTangent(from: { x: number, y: number }, tip: { x: n
     x: tip.x - ux * headLength - px * headHalfWidth,
     y: tip.y - uy * headLength - py * headHalfWidth
   }
-  return [left.x, left.y, tip.x, tip.y, right.x, right.y]
+  const notch = {
+    x: tip.x - ux * (headLength - notchDepth),
+    y: tip.y - uy * (headLength - notchDepth)
+  }
+  // Concave polygon: tip -> left -> notch -> right
+  return [tip.x, tip.y, left.x, left.y, notch.x, notch.y, right.x, right.y]
 }
 
 function getArrowShaftPoints(shape: Shape): number[] {
@@ -2560,6 +2566,8 @@ defineExpose({ exportImage })
                   name: `shape-hit-${shape.id}`,
                   points: getArrowHeadPoints(shape),
                   stroke: getColors(shape).stroke,
+                  fill: getColors(shape).stroke,
+                  closed: true,
                   strokeWidth: getShapeStrokeWidthPx(shape),
                   lineCap: 'round',
                   lineJoin: 'round',
@@ -3366,7 +3374,7 @@ defineExpose({ exportImage })
           />
           <!-- ?쇰컲 ?꾪삎 誘몃━蹂닿린 -->
           <v-line
-            v-if="toolStore.shapeType === 'arrow-curve' && mousePos && toolStore.tempPoints.length >= 1"
+            v-if="(toolStore.shapeType === 'arrow' || toolStore.shapeType === 'arrow-curve') && mousePos && toolStore.tempPoints.length >= 1"
             :config="{
               points: getArrowPreviewShaftPoints(),
               stroke: '#FB923C',
@@ -3377,10 +3385,12 @@ defineExpose({ exportImage })
             }"
           />
           <v-line
-            v-if="toolStore.shapeType === 'arrow-curve' && mousePos && toolStore.tempPoints.length >= 1"
+            v-if="(toolStore.shapeType === 'arrow' || toolStore.shapeType === 'arrow-curve') && mousePos && toolStore.tempPoints.length >= 1"
             :config="{
               points: getArrowPreviewHeadPoints(),
               stroke: '#FB923C',
+              fill: '#FB923C',
+              closed: true,
               strokeWidth: 2,
               dash: [5, 5],
               lineCap: 'round',
@@ -3388,7 +3398,7 @@ defineExpose({ exportImage })
             }"
           />
           <v-line
-            v-if="toolStore.shapeType !== 'circle' && toolStore.shapeType !== 'arrow-curve' && mousePos"
+            v-if="toolStore.shapeType !== 'circle' && toolStore.shapeType !== 'arrow' && toolStore.shapeType !== 'arrow-curve' && mousePos"
             :config="{
               points: getPolygonPoints(getPreviewPoints()),
               stroke: '#FB923C',
