@@ -112,7 +112,7 @@ export const useToolStore = defineStore('tool', () => {
 
   // 배율 설정
   function setZoom(v: number) {
-    zoom.value = Math.max(50, Math.min(200, v))
+    zoom.value = Math.max(100, Math.min(200, v))
   }
 
   function zoomIn() {

@@ -881,12 +881,35 @@ onUnmounted(() => {
               보조선 뒤집기
             </button>
           </div>
-          <div>
-            <p class="text-xs text-gray-500 mb-1">색상</p>
-            <div class="flex items-center flex-wrap gap-1.5">
-              <button v-for="color in STROKE_PALETTE" :key="`item-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="patchShapeGuideItemStyle({ color: color.hex })"></button>
+          <!-- 높이 가이드: 색상·굵기 3종/2종 따로 설정 -->
+          <template v-if="shapeGuideItemKey === 'height'">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">높이선 색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="`hline-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="patchShapeGuideItemStyle({ heightLineColor: color.hex })"></button>
+              </div>
             </div>
-          </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">길이선 색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="`mline-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="patchShapeGuideItemStyle({ measureLineColor: color.hex })"></button>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">텍스트 색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="`text-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="patchShapeGuideItemStyle({ textColor: color.hex })"></button>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">색상</p>
+              <div class="flex items-center flex-wrap gap-1.5">
+                <button v-for="color in STROKE_PALETTE" :key="`item-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="patchShapeGuideItemStyle({ color: color.hex })"></button>
+              </div>
+            </div>
+          </template>
           <div>
             <p class="text-xs text-gray-500 mb-1">글자 크기</p>
             <div class="flex items-center gap-1">
@@ -895,14 +918,35 @@ onUnmounted(() => {
               <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ fontSize: Math.min(72, Number(getShapeGuideItemStyle().fontSize || 11) + 1) })">+</button>
             </div>
           </div>
-          <div>
-            <p class="text-xs text-gray-500 mb-1">선 굵기</p>
-            <div class="flex items-center gap-1">
-              <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ lineWidth: Number(Math.max(GUIDE_LINE_WIDTH_MIN, Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT) - GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">-</button>
-              <span class="text-xs w-10 text-center">{{ Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT).toFixed(1) }}</span>
-              <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ lineWidth: Number(Math.min(GUIDE_LINE_WIDTH_MAX, Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT) + GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">+</button>
+          <!-- 높이 가이드: 굵기 2종 따로, 나머지는 통합 -->
+          <template v-if="shapeGuideItemKey === 'height'">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">높이선 굵기</p>
+              <div class="flex items-center gap-1">
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ heightLineWidth: Number(Math.max(GUIDE_LINE_WIDTH_MIN, Number(getShapeGuideItemStyle().heightLineWidth || 0.5) - GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">-</button>
+                <span class="text-xs w-10 text-center">{{ Number(getShapeGuideItemStyle().heightLineWidth || 0.5).toFixed(1) }}</span>
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ heightLineWidth: Number(Math.min(GUIDE_LINE_WIDTH_MAX, Number(getShapeGuideItemStyle().heightLineWidth || 0.5) + GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">+</button>
+              </div>
             </div>
-          </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">길이선 굵기</p>
+              <div class="flex items-center gap-1">
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ measureLineWidth: Number(Math.max(GUIDE_LINE_WIDTH_MIN, Number(getShapeGuideItemStyle().measureLineWidth || 0.4) - GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">-</button>
+                <span class="text-xs w-10 text-center">{{ Number(getShapeGuideItemStyle().measureLineWidth || 0.4).toFixed(1) }}</span>
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ measureLineWidth: Number(Math.min(GUIDE_LINE_WIDTH_MAX, Number(getShapeGuideItemStyle().measureLineWidth || 0.4) + GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">+</button>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">선 굵기</p>
+              <div class="flex items-center gap-1">
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ lineWidth: Number(Math.max(GUIDE_LINE_WIDTH_MIN, Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT) - GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">-</button>
+                <span class="text-xs w-10 text-center">{{ Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT).toFixed(1) }}</span>
+                <button class="px-2 py-0.5 border rounded" @click="patchShapeGuideItemStyle({ lineWidth: Number(Math.min(GUIDE_LINE_WIDTH_MAX, Number(getShapeGuideItemStyle().lineWidth || GUIDE_LINE_WIDTH_DEFAULT) + GUIDE_LINE_WIDTH_STEP).toFixed(1)) })">+</button>
+              </div>
+            </div>
+          </template>
           <div v-if="isShapeGuideItemBlank()">
             <p class="text-xs text-gray-500 mb-1">빈칸 폭 (mm)</p>
             <div class="flex items-center gap-1">

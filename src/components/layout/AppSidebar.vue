@@ -410,7 +410,7 @@ const gridModeMeta = computed(() => {
           </button>
         </div>
         <!-- 입체도형 (2차) -->
-        <div class="border-t border-gray-100 pt-2">
+        <!-- <div class="border-t border-gray-100 pt-2">
           <p class="text-xs text-gray-400 mb-1.5 flex items-center gap-1">
             입체도형
             <span class="badge-soon">준비중</span>
@@ -420,7 +420,7 @@ const gridModeMeta = computed(() => {
               <span class="text-xs">{{ label }}</span>
             </button>
           </div>
-        </div>
+        </div> -->
       </div>
     </div>
 
@@ -443,20 +443,20 @@ const gridModeMeta = computed(() => {
         <button class="sub-btn" :class="isShapeActive('arrow-curve') ? 'sub-btn-active' : 'sub-btn-default'" @click="selectShape('arrow-curve')">
           <span class="text-lg">⤳</span><span class="text-xs">화살표(곡선)</span>
         </button>
-        <button class="sub-btn sub-btn-disabled col-span-2" disabled>
+        <!-- <button class="sub-btn sub-btn-disabled col-span-2" disabled>
           <span class="text-lg">123</span><span class="text-xs">수 모형</span>
           <span class="badge-soon">준비중</span>
-        </button>
+        </button> -->
       </div>
       <!-- AI 삽화 (2차) -->
-      <div class="border-t border-gray-100 pt-2 mt-2">
+      <!-- <div class="border-t border-gray-100 pt-2 mt-2">
         <button class="sub-btn sub-btn-disabled w-full" disabled>
           <span class="text-xs text-gray-400 flex items-center gap-1">
             AI 삽화 생성
             <span class="badge-soon">준비중</span>
           </span>
         </button>
-      </div>
+      </div> -->
     </div>
 
   </div>

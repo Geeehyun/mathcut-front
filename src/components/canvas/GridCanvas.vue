@@ -147,6 +147,14 @@ function handleWindowKeyup(e: KeyboardEvent) {
   }
 }
 
+function handleWheel(e: WheelEvent) {
+  const isZoomGesture = e.ctrlKey || e.metaKey
+  if (!isZoomGesture) return
+  e.preventDefault()
+  const step = e.deltaY < 0 ? 10 : -10
+  toolStore.setZoom(toolStore.zoom + step)
+}
+
 // Rendered stage size: fill container while keeping minimum canvas size
 const stageWidth = computed(() => Math.max(canvasWidth, containerSize.value.width))
 const stageHeight = computed(() => Math.max(canvasHeight, containerSize.value.height))
@@ -3256,16 +3264,425 @@ function downloadDataUrl(dataUrl: string, filename: string) {
   link.click()
 }
 
-function exportImage(format: 'png' | 'pdf' | 'svg', width: number, height: number, dpi: number = 300): boolean {
+function sanitizeFilename(input: string): string {
+  const trimmed = input.trim()
+  const fallback = `mathcut-${Date.now()}`
+  if (!trimmed) return fallback
+  return trimmed.replace(/[\\/:*?"<>|]+/g, '_')
+}
+
+// ── 진짜 벡터 SVG 내보내기 ───────────────────────────────────────────
+function svgEsc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function svgPts(flat: number[]): string {
+  const pts: string[] = []
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    pts.push(`${flat[i].toFixed(2)},${flat[i + 1].toFixed(2)}`)
+  }
+  return pts.join(' ')
+}
+
+/** 빈칸 rect를 SVG 요소로 반환 */
+function svgBlankRectEl(shape: Shape, key: 'length' | 'angle' | 'pointName' | 'height', index: number): string {
+  const r = getShapeGuideBlankRect(shape, key, index)
+  return `<rect x="${r.x.toFixed(2)}" y="${r.y.toFixed(2)}" width="${r.width.toFixed(2)}" height="${r.height.toFixed(2)}" rx="${r.cornerRadius.toFixed(2)}" fill="white" stroke="${BLANK_BORDER_COLOR}" stroke-width="${BLANK_BORDER_WIDTH_PX.toFixed(2)}"/>`
+}
+
+/**
+ * 길이 텍스트를 화면과 동일한 간격으로 SVG에 출력하는 헬퍼
+ * - showGuideUnit=false: 숫자 하나를 중앙(anchorX)에 배치
+ * - showGuideUnit=true : 숫자와 "cm"을 화면 gap(getLengthUnitGapPx)만큼 띄워
+ *   블록 전체의 중앙이 anchorX가 되도록 두 <text> 요소로 출력
+ */
+function svgUnitText(
+  anchorX: number,
+  anchorY: number,
+  fullText: string,
+  fontSize: number,
+  fill: string,
+  ff: string,
+  extraAttrs: string = ''
+): string[] {
+  const base = `dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${fontSize}" fill="${fill}"${extraAttrs}`
+  if (!toolStore.showGuideUnit) {
+    const numText = stripGuideUnit(fullText)
+    return [`<text x="${anchorX.toFixed(2)}" y="${anchorY.toFixed(2)}" text-anchor="middle" ${base}>${svgEsc(numText)}</text>`]
+  }
+  const numText = stripGuideUnit(fullText)
+  const unitStr = 'cm'
+  const gap = getLengthUnitGapPx()
+  const numW = getTextWidthPx(numText, fontSize)
+  const unitW = getTextWidthPx(unitStr, fontSize)
+  // 블록 전체(numW + gap + unitW)의 중앙 = anchorX
+  const numCx = anchorX - (gap + unitW) / 2
+  const unitCx = anchorX + (numW + gap) / 2
+  return [
+    `<text x="${numCx.toFixed(2)}" y="${anchorY.toFixed(2)}" text-anchor="middle" ${base}>${svgEsc(numText)}</text>`,
+    `<text x="${unitCx.toFixed(2)}" y="${anchorY.toFixed(2)}" text-anchor="middle" ${base}>${svgEsc(unitStr)}</text>`
+  ]
+}
+
+function generateVectorSVG(exportW: number, exportH: number, includeBackground: boolean): string {
+  const sw = stageWidth.value
+  const sh = stageHeight.value
+  const els: string[] = []
+  const ff = DEFAULT_TEXT_FONT_FAMILY
+  const fs = DEFAULT_TEXT_FONT_SIZE
+
+  // 1. 배경 & 격자
+  if (includeBackground) {
+    const bgColor = toolStore.gridBackgroundColor || '#ffffff'
+    els.push(`<rect x="0" y="0" width="${sw}" height="${sh}" fill="${bgColor}"/>`)
+    if (toolStore.gridMode === 'grid') {
+      const gs = GRID_CONFIG.size
+      const major = GRID_CONFIG.majorInterval
+      const lc = toolStore.gridLineColor || '#009FE3'
+      const numC = Math.ceil(sw / gs) + 1
+      const numR = Math.ceil(sh / gs) + 1
+      for (let c = 0; c <= numC; c++) {
+        const x = c * gs
+        const isMaj = c % major === 0
+        els.push(`<line x1="${x}" y1="0" x2="${x}" y2="${sh}" stroke="${lc}" stroke-width="${isMaj ? 0.6 : 0.25}" opacity="${isMaj ? '1' : '0.7'}"/>`)
+      }
+      for (let r = 0; r <= numR; r++) {
+        const y = r * gs
+        const isMaj = r % major === 0
+        els.push(`<line x1="0" y1="${y}" x2="${sw}" y2="${y}" stroke="${lc}" stroke-width="${isMaj ? 0.6 : 0.25}" opacity="${isMaj ? '1' : '0.7'}"/>`)
+      }
+    } else if (toolStore.gridMode === 'dots') {
+      const gs = GRID_CONFIG.size
+      const lc = toolStore.gridLineColor || '#009FE3'
+      const numC = Math.ceil(sw / gs)
+      const numR = Math.ceil(sh / gs)
+      for (let r = 0; r <= numR; r++) {
+        for (let c = 0; c <= numC; c++) {
+          els.push(`<circle cx="${c * gs}" cy="${r * gs}" r="1.2" fill="${lc}"/>`)
+        }
+      }
+    }
+  } else {
+    els.push(`<rect x="0" y="0" width="${sw}" height="${sh}" fill="#ffffff"/>`)
+  }
+
+  // 2. 도형 본체
+  for (const shape of canvasStore.shapes) {
+    if (shape.visible === false) continue
+    const colors = getColors(shape)
+    const strokeW = getShapeStrokeWidthPx(shape)
+    const fillVal = colors.fill || 'none'
+
+    if (shape.type === 'point' || shape.type === 'point-on-object') {
+      const p = shape.points[0]
+      if (!p) continue
+      els.push(`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="3" fill="${colors.point}"/>`)
+      continue
+    }
+
+    if (shape.type === 'circle') {
+      if (shape.points.length < 2) continue
+      const cp = shape.points[0]
+      const r = calculateDistancePixels(cp, shape.points[1])
+      els.push(`<circle cx="${cp.x.toFixed(2)}" cy="${cp.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${fillVal}" stroke="${colors.stroke}" stroke-width="${strokeW}"/>`)
+    } else if (shape.type === 'arrow' || shape.type === 'arrow-curve') {
+      const shaft = getArrowShaftPoints(shape)
+      const head = getArrowHeadPoints(shape)
+      if (shaft.length >= 4) {
+        if (shape.type === 'arrow-curve' && shaft.length > 4) {
+          els.push(`<polyline points="${svgPts(shaft)}" fill="none" stroke="${colors.stroke}" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round"/>`)
+        } else {
+          els.push(`<line x1="${shaft[0].toFixed(2)}" y1="${shaft[1].toFixed(2)}" x2="${shaft[shaft.length - 2].toFixed(2)}" y2="${shaft[shaft.length - 1].toFixed(2)}" stroke="${colors.stroke}" stroke-width="${strokeW}"/>`)
+        }
+      }
+      if (head.length >= 6) {
+        els.push(`<polygon points="${svgPts(head)}" fill="${colors.stroke}" stroke="${colors.stroke}" stroke-width="${strokeW}" stroke-linejoin="round"/>`)
+      }
+    } else if (shape.type === 'ray') {
+      const rayPts = getExtendedRayPoints(shape.points)
+      if (rayPts.length >= 4) {
+        els.push(`<line x1="${rayPts[0].toFixed(2)}" y1="${rayPts[1].toFixed(2)}" x2="${rayPts[2].toFixed(2)}" y2="${rayPts[3].toFixed(2)}" stroke="${colors.stroke}" stroke-width="${strokeW}"/>`)
+        const tipFrom = { x: (rayPts[0] + rayPts[2]) / 2, y: (rayPts[1] + rayPts[3]) / 2 }
+        const tip = { x: rayPts[2], y: rayPts[3] }
+        const head = getArrowHeadPointsByTangent(tipFrom, tip)
+        if (head.length >= 6) {
+          els.push(`<polygon points="${svgPts(head)}" fill="${colors.stroke}" stroke="${colors.stroke}" stroke-width="${strokeW}"/>`)
+        }
+      }
+    } else {
+      const pts = getRenderedShapePoints(shape)
+      if (pts.length < 4) continue
+      const isOpen = openShapeTypes.has(shape.type)
+      if (isOpen) {
+        els.push(`<polyline points="${svgPts(pts)}" fill="none" stroke="${colors.stroke}" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round"/>`)
+      } else {
+        els.push(`<polygon points="${svgPts(pts)}" fill="${fillVal}" stroke="${colors.stroke}" stroke-width="${strokeW}" stroke-linejoin="round"/>`)
+      }
+    }
+
+    // 꼭짓점 점 표시
+    for (let pi = 0; pi < shape.points.length; pi++) {
+      if (!isShapePointVisible(shape, pi)) continue
+      const p = shape.points[pi]
+      els.push(`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="3" fill="${colors.point}"/>`)
+    }
+  }
+
+  // 3. 측정/가이드 어노테이션
+  for (const shape of canvasStore.shapes) {
+    if (shape.visible === false) continue
+    const colors = getColors(shape)
+    const defTc = colors.label || DEFAULT_TEXT_COLOR
+
+    // 길이 가이드 (원 제외)
+    if (shape.type !== 'circle' && toolStore.showLength && isShapeGuideVisible(shape, 'length')) {
+      const isOpen = openShapeTypes.has(shape.type)
+      const edgeCount = isOpen ? Math.max(0, shape.points.length - 1) : shape.points.length
+      for (let pi = 0; pi < edgeCount; pi++) {
+        if (!isShapeGuideItemVisible(shape, 'length', pi)) continue
+        const gSt = getShapeGuideItemStyle(shape, 'length', pi)
+        const lc = gSt.lineColor || LENGTH_GUIDE_DEFAULT_COLOR
+        for (const seg of getShapeLengthCurveSegments(shape, pi)) {
+          if (seg.length >= 4) {
+            els.push(`<polyline points="${svgPts(seg)}" fill="none" stroke="${lc}" stroke-width="${DEFAULT_GUIDE_LINE_PX}" stroke-dasharray="2 2"/>`)
+          }
+        }
+        if (!isShapeGuideItemBlank(shape, 'length', pi)) {
+          const pos = getShapeLengthLabelPos(shape, pi)
+          const off = getShapeGuideItemOffset(shape, 'length', pi)
+          const text = getShapeLengthValueText(shape, pi)
+          const tc = getShapeGuideTextColor(shape, 'length', pi, defTc)
+          if (text) {
+            els.push(...svgUnitText(pos.x + off.x, pos.y + off.y, text, gSt.fontSize || fs, tc, ff))
+          }
+        } else {
+          els.push(svgBlankRectEl(shape, 'length', pi))
+          if (toolStore.showGuideUnit) {
+            const upos = getShapeGuideBlankUnitPos(shape, 'length', pi)
+            const br = getShapeGuideBlankRect(shape, 'length', pi)
+            const tc = getShapeGuideTextColor(shape, 'length', pi, defTc)
+            els.push(`<text x="${upos.x.toFixed(2)}" y="${(br.y + br.height / 2).toFixed(2)}" text-anchor="start" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${gSt.fontSize || fs}" fill="${tc}">cm</text>`)
+          }
+        }
+      }
+    }
+
+    // 원 반지름/지름 가이드
+    if (shape.type === 'circle' && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0)) {
+      const gSt = getShapeGuideItemStyle(shape, 'length', 0)
+      const lc = gSt.lineColor || LENGTH_GUIDE_DEFAULT_COLOR
+      for (const seg of getCircleLengthCurveSegments(shape)) {
+        if (seg.length >= 4) {
+          els.push(`<polyline points="${svgPts(seg)}" fill="none" stroke="${lc}" stroke-width="${DEFAULT_GUIDE_LINE_PX}" stroke-dasharray="2 2"/>`)
+        }
+      }
+      if (!isShapeGuideItemBlank(shape, 'length', 0)) {
+        const pos = getCircleLengthLabelWorldPos(shape)
+        const text = getCircleLengthValueText(shape)
+        const tc = getShapeGuideTextColor(shape, 'length', 0, defTc)
+        if (text) {
+          els.push(...svgUnitText(pos.x, pos.y, text, gSt.fontSize || fs, tc, ff))
+        }
+      } else {
+        els.push(svgBlankRectEl(shape, 'length', 0))
+        if (toolStore.showGuideUnit) {
+          const upos = getShapeGuideBlankUnitPos(shape, 'length', 0)
+          const br = getShapeGuideBlankRect(shape, 'length', 0)
+          const tc = getShapeGuideTextColor(shape, 'length', 0, defTc)
+          els.push(`<text x="${upos.x.toFixed(2)}" y="${(br.y + br.height / 2).toFixed(2)}" text-anchor="start" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${gSt.fontSize || fs}" fill="${tc}">cm</text>`)
+        }
+      }
+    }
+
+    // 높이 가이드
+    if (toolStore.showLength && isShapeGuideVisible(shape, 'height')) {
+      const hg = getShapeHeightGuide(shape)
+      if (hg) {
+        const hSt = getShapeGuideItemStyle(shape, 'height', 0)
+        const hc = hSt.heightLineColor || HEIGHT_GUIDE_DEFAULT_COLOR
+        const hLW = hSt.heightLineWidth ? hSt.heightLineWidth * PT_TO_PX : DEFAULT_HEIGHT_GUIDE_LINE_PX
+        const mc = hSt.measureLineColor || LENGTH_GUIDE_DEFAULT_COLOR
+        // 메인 높이선 (apex → foot): 화면과 동일하게 점선
+        els.push(`<line x1="${hg.apex.x.toFixed(2)}" y1="${hg.apex.y.toFixed(2)}" x2="${hg.foot.x.toFixed(2)}" y2="${hg.foot.y.toFixed(2)}" stroke="${hc}" stroke-width="${hLW}" stroke-dasharray="2 2"/>`)
+        // 수선의 발이 밑변 밖에 있을 때(t<0 or t>1) 밑변 꼭짓점 → 수선의 발 확장선 (점선)
+        if (hg.t < 0 || hg.t > 1) {
+          const anchor = hg.t < 0 ? hg.baseA : hg.baseB
+          els.push(`<line x1="${anchor.x.toFixed(2)}" y1="${anchor.y.toFixed(2)}" x2="${hg.foot.x.toFixed(2)}" y2="${hg.foot.y.toFixed(2)}" stroke="${hc}" stroke-width="${hLW}" stroke-dasharray="2 2"/>`)
+        }
+        // 직각 마커: 화면과 동일하게 ANGLE_GUIDE_DEFAULT_COLOR 사용
+        const marker = getShapeHeightRightAngleMarkerPoints(shape)
+        if (marker.length >= 6) {
+          els.push(`<polyline points="${svgPts(marker)}" fill="none" stroke="${ANGLE_GUIDE_DEFAULT_COLOR}" stroke-width="${DEFAULT_GUIDE_LINE_PX}"/>`)
+        }
+        for (const seg of getShapeHeightLengthGuideSegments(shape)) {
+          if (seg.length >= 4) {
+            els.push(`<polyline points="${svgPts(seg)}" fill="none" stroke="${mc}" stroke-width="${DEFAULT_GUIDE_LINE_PX}" stroke-dasharray="2 2"/>`)
+          }
+        }
+        if (!isShapeGuideItemBlank(shape, 'height', 0)) {
+          const pos = getShapeHeightLabelPos(shape)
+          const off = getShapeGuideItemOffset(shape, 'height', 0)
+          const text = getShapeHeightValueText(shape)
+          const tc = getShapeGuideTextColor(shape, 'height', 0, defTc)
+          if (text) {
+            els.push(...svgUnitText(pos.x + off.x, pos.y + off.y, text, hSt.fontSize || fs, tc, ff))
+          }
+        } else {
+          els.push(svgBlankRectEl(shape, 'height', 0))
+          if (toolStore.showGuideUnit) {
+            const upos = getShapeGuideBlankUnitPos(shape, 'height', 0)
+            const br = getShapeGuideBlankRect(shape, 'height', 0)
+            const tc = getShapeGuideTextColor(shape, 'height', 0, defTc)
+            els.push(`<text x="${upos.x.toFixed(2)}" y="${(br.y + br.height / 2).toFixed(2)}" text-anchor="start" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${hSt.fontSize || fs}" fill="${tc}">cm</text>`)
+          }
+        }
+      }
+    }
+
+    // 각도 가이드
+    if (toolStore.showAngle && isShapeGuideVisible(shape, 'angle')) {
+      const angleIndices = shape.type === 'angle-line'
+        ? (shape.points.length >= 3 ? [1] : [])
+        : (toolStore.angleDisplayMode === 'all'
+          ? shape.points.map((_, i) => i)
+          : findRightAngles(shape.points))
+      for (const ai of angleIndices) {
+        if (!isShapeGuideItemVisible(shape, 'angle', ai)) continue
+        const aSt = getShapeGuideItemStyle(shape, 'angle', ai)
+        const lc = aSt.lineColor || ANGLE_GUIDE_DEFAULT_COLOR
+        const gLW = aSt.lineWidth ? aSt.lineWidth * PT_TO_PX : DEFAULT_GUIDE_LINE_PX
+        if (isRightAngleAt(shape, ai)) {
+          const mp = getRightAngleMarkerPoints(shape.points, ai)
+          if (mp) {
+            els.push(`<polyline points="${mp.p1.x.toFixed(2)},${mp.p1.y.toFixed(2)} ${mp.corner.x.toFixed(2)},${mp.corner.y.toFixed(2)} ${mp.p2.x.toFixed(2)},${mp.p2.y.toFixed(2)}" fill="none" stroke="${lc}" stroke-width="${gLW}"/>`)
+          }
+        } else if (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') {
+          const arcPts = getShapeAngleArcPolyline(shape, ai)
+          if (arcPts.length >= 4) {
+            els.push(`<polyline points="${svgPts(arcPts)}" fill="none" stroke="${lc}" stroke-width="${gLW}"/>`)
+          }
+        }
+        if (!isShapeGuideItemBlank(shape, 'angle', ai)) {
+          const pos = getShapeAngleLabelPos(shape, ai)
+          const off = getShapeGuideItemOffset(shape, 'angle', ai)
+          const text = getShapeAngleValueText(shape, ai)
+          const tc = getShapeGuideTextColor(shape, 'angle', ai, defTc)
+          if (text) {
+            els.push(`<text x="${(pos.x + off.x).toFixed(2)}" y="${(pos.y + off.y).toFixed(2)}" text-anchor="middle" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${aSt.fontSize || fs}" fill="${tc}">${svgEsc(text)}</text>`)
+          }
+        } else {
+          els.push(svgBlankRectEl(shape, 'angle', ai))
+          const spos = getShapeGuideBlankSuffixPos(shape, 'angle', ai)
+          const br = getShapeGuideBlankRect(shape, 'angle', ai)
+          const tc = getShapeGuideTextColor(shape, 'angle', ai, defTc)
+          els.push(`<text x="${spos.x.toFixed(2)}" y="${(br.y + br.height / 2).toFixed(2)}" text-anchor="start" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${aSt.fontSize || fs}" fill="${tc}">°</text>`)
+        }
+      }
+    }
+
+    // 점 이름
+    if (toolStore.showPointName && isShapeGuideVisible(shape, 'pointName')) {
+      for (let pi = 0; pi < shape.points.length; pi++) {
+        if (!isShapeGuideItemVisible(shape, 'pointName', pi)) continue
+        if (isShapeGuideItemBlank(shape, 'pointName', pi)) {
+          els.push(svgBlankRectEl(shape, 'pointName', pi))
+          continue
+        }
+        if (shape.pointLabelLatex?.[pi]) continue
+        const pos = getShapePointNameTextPos(shape, pi)
+        const off = getShapeGuideItemOffset(shape, 'pointName', pi)
+        const label = getGlobalPointLabel(shape.id, pi)
+        const tc = getShapeGuideTextColor(shape, 'pointName', pi, defTc)
+        const pSt = getShapeGuideItemStyle(shape, 'pointName', pi)
+        els.push(`<text x="${(pos.x + off.x).toFixed(2)}" y="${(pos.y + off.y).toFixed(2)}" text-anchor="middle" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${pSt.fontSize || fs}" fill="${tc}" font-weight="bold">${svgEsc(label)}</text>`)
+      }
+    }
+  }
+
+  // 4. 독립 가이드
+  for (const guide of canvasStore.guides) {
+    if (guide.visible === false) continue
+    if (guide.type === 'text' && guide.text) {
+      const p = guide.points[0]
+      if (!p) continue
+      const gfs = guide.fontSize || fs
+      const gc = guide.color || DEFAULT_TEXT_COLOR
+      const rot = guide.rotation || 0
+      const rotAttr = rot !== 0 ? ` transform="rotate(${rot} ${p.x.toFixed(2)} ${p.y.toFixed(2)})"` : ''
+      els.push(`<text x="${p.x.toFixed(2)}" y="${p.y.toFixed(2)}" text-anchor="middle" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${gfs}" fill="${gc}"${rotAttr}>${svgEsc(guide.text)}</text>`)
+    } else if (guide.type === 'length' && guide.points.length >= 2 && toolStore.showLength) {
+      const gc = guide.color || LENGTH_GUIDE_DEFAULT_COLOR
+      const gLW = guide.lineWidth ? guide.lineWidth * PT_TO_PX : DEFAULT_GUIDE_LINE_PX
+      for (const seg of [getLengthGuideCurvePoints(guide)]) {
+        if (seg.length >= 4) {
+          els.push(`<polyline points="${svgPts(seg)}" fill="none" stroke="${gc}" stroke-width="${gLW}" stroke-dasharray="2 2"/>`)
+        }
+      }
+      if (guide.text) {
+        const lp = getLengthGuideLabelPos(guide)
+        els.push(`<text x="${lp.x.toFixed(2)}" y="${lp.y.toFixed(2)}" text-anchor="middle" dominant-baseline="middle" font-family="${svgEsc(ff)}" font-size="${guide.fontSize || fs}" fill="${gc}">${svgEsc(guide.text)}</text>`)
+      }
+    }
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${exportW}" height="${exportH}" viewBox="0 0 ${sw} ${sh}">\n${els.join('\n')}\n</svg>`
+}
+
+function exportImage(
+  format: 'png' | 'pdf' | 'svg',
+  width: number,
+  height: number,
+  dpi: number = 300,
+  options?: { fileName?: string, includeBackground?: boolean }
+): boolean {
   const stage = stageRef.value?.getNode?.()
   if (!stage) return false
   const w = Math.max(100, width || canvasWidth)
   const h = Math.max(100, height || canvasHeight)
-  const pixelRatio = Math.max(1, dpi / 96)
-  const pngDataUrl = stage.toDataURL({ pixelRatio })
+  const dpiScale = Math.max(1, dpi / 96)
+  // pixelRatio는 스테이지(창 크기)가 아닌 그리드 고유 크기 기준으로 계산
+  // → 창 크기와 무관하게 항상 그리드 영역만 정확히 내보낸다
+  const isDownscaling = w < canvasWidth || h < canvasHeight
+  const pixelRatio = isDownscaling
+    ? Math.max(w / canvasWidth, h / canvasHeight, 0.2)
+    : dpiScale
+  const includeBackground = options?.includeBackground !== false
+  const baseName = sanitizeFilename(options?.fileName || '')
+  // 그리드 레이어 전체(배경색 rect + 격자선/점)를 export-bg로부터 찾아 제어
+  const backgroundNode = stage.findOne('.export-bg') as any
+  const gridLayer = backgroundNode ? (backgroundNode.getLayer?.() ?? null) : null
+  const prevGridLayerVisible = gridLayer ? gridLayer.visible() : true
+  if (gridLayer && !includeBackground) {
+    gridLayer.visible(false)
+    stage.draw()
+  }
+  const sourceCanvas = stage.toCanvas({ pixelRatio })
+  const outputCanvas = document.createElement('canvas')
+  outputCanvas.width = w
+  outputCanvas.height = h
+  const outputCtx = outputCanvas.getContext('2d')
+  if (!outputCtx) return false
+  outputCtx.imageSmoothingEnabled = true
+  outputCtx.imageSmoothingQuality = 'high'
+  outputCtx.clearRect(0, 0, w, h)
+  // 배경 미포함 시 흰색으로 채운 뒤 도형만 합성
+  if (!includeBackground) {
+    outputCtx.fillStyle = '#FFFFFF'
+    outputCtx.fillRect(0, 0, w, h)
+  }
+  // 소스에서 그리드 영역(canvasWidth × canvasHeight)만 크롭 후 출력 캔버스에 맞게 그리기
+  // → 스테이지가 창 전체를 덮어도 그리드 밖 여백이 출력에 포함/왜곡되지 않음
+  const srcW = Math.round(canvasWidth * pixelRatio)
+  const srcH = Math.round(canvasHeight * pixelRatio)
+  outputCtx.drawImage(sourceCanvas, 0, 0, srcW, srcH, 0, 0, w, h)
+  const pngDataUrl = outputCanvas.toDataURL('image/png')
+  if (gridLayer && !includeBackground) {
+    gridLayer.visible(prevGridLayerVisible)
+    stage.draw()
+  }
 
   if (format === 'png') {
-    downloadDataUrl(pngDataUrl, `mathcut-${Date.now()}.png`)
+    downloadDataUrl(pngDataUrl, `${baseName}.png`)
     return true
   }
 
@@ -3277,16 +3694,17 @@ function exportImage(format: 'png' | 'pdf' | 'svg', width: number, height: numbe
       format: [w * pxToMm, h * pxToMm]
     })
     pdf.addImage(pngDataUrl, 'PNG', 0, 0, w * pxToMm, h * pxToMm)
-    pdf.save(`mathcut-${Date.now()}.pdf`)
+    pdf.save(`${baseName}.pdf`)
     return true
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><image href="${pngDataUrl}" x="0" y="0" width="${w}" height="${h}" /></svg>`
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+  // 진짜 벡터 SVG 생성 (viewBox로 어떤 크기에서도 선명)
+  const svgContent = generateVectorSVG(w, h, includeBackground)
+  const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `mathcut-${Date.now()}.svg`
+  link.download = `${baseName}.svg`
   link.click()
   URL.revokeObjectURL(url)
   return true
@@ -3300,6 +3718,7 @@ defineExpose({ exportImage })
     ref="containerRef"
     class="w-full h-full bg-white overflow-hidden relative"
     @mouseleave="handleMouseLeave"
+    @wheel="handleWheel"
     @contextmenu.prevent="handleNativeContextMenu"
   >
     <div
@@ -3321,7 +3740,7 @@ defineExpose({ exportImage })
     >
       <!-- Grid layer -->
       <v-layer :config="{ listening: false }">
-        <v-rect :config="{ x: 0, y: 0, width: stageWidth, height: stageHeight, fill: toolStore.gridBackgroundColor }" />
+        <v-rect :config="{ name: 'export-bg', x: 0, y: 0, width: stageWidth, height: stageHeight, fill: toolStore.gridBackgroundColor }" />
         <!-- gridMode === 'grid': show grid lines -->
         <template v-if="toolStore.gridMode === 'grid'">
           <v-shape :key="`grid-${gridShapeRenderKey}`" :config="{ sceneFunc: drawGridLines, listening: false }" />

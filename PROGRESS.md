@@ -49,6 +49,44 @@
 
 > 최신순 정렬. 상세 내용은 `logs/` 참조.
 
+### 2026-03-10
+
+#### [Claude] 내보내기 해상도(DPI) 가이드 UI 개선
+- `EditorView.vue`: SVG 선택 시 해상도 섹션 숨김+벡터 안내, PNG/PDF에 DPI별 용도 설명 추가
+- `npm run build` 통과
+
+#### [Claude] SVG 빈칸형 표시 + 높이 가이드 색상/굵기 분리 설정
+- `GridCanvas.vue`: `svgBlankRectEl()` 헬퍼로 길이/원/높이/각도/점이름 빈칸 rect SVG 렌더링 추가
+- `ContextMenu.vue`: 높이 우클릭 메뉴에 높이선색/길이선색/텍스트색/높이선굵기/길이선굵기 별도 컨트롤 추가
+- `npm run build` 통과
+
+#### [Claude] SVG 내보내기 높이 보조선 점선 누락 수정
+- `GridCanvas.vue`: 메인 높이선 `stroke-dasharray="2 2"` 추가, 확장 base선 누락 추가, 직각 마커 색상 수정
+- `npm run build` 통과
+
+#### [Claude] SVG 내보내기 단위(cm) 간격 화면 일치 수정
+- `GridCanvas.vue`: `svgUnitText()` 헬퍼로 숫자·단위를 분리 출력, 블록 중앙 계산으로 화면과 동일한 간격 유지
+- `npm run build` 통과
+
+#### [Claude] PNG/PDF 내보내기 비율 왜곡 버그 수정
+- `GridCanvas.vue`: `pixelRatio` 계산 기준을 스테이지(창) 크기 → 그리드 고유 크기(1280×720)로 변경
+- `drawImage` 6인수 크롭 형태로 변경 → 창 크기와 무관하게 그리드 영역만 정확히 내보내기
+- `npm run build` 통과
+
+#### [Claude] SVG 진짜 벡터 내보내기 구현
+- `GridCanvas.vue`: `generateVectorSVG()` 함수 추가 — 도형/격자/측정/가이드 전체를 SVG 원시 요소로 직접 생성
+- `viewBox` 활용으로 어떤 크기에도 픽셀 깨짐 없음, 기존 PNG-in-SVG 래스터 방식 완전 교체
+- `npm run build` 통과
+
+#### [Claude] 내보내기 크기 검증 + 초기화 + 권장 프리셋 UI 추가
+- `EditorView.vue`: 0/음수/범위 초과 검증, [초기화] 버튼, 720p·1080p·2K 프리셋, 비율 표시, 내보내기 버튼 비활성화
+- `npm run build` 통과
+
+#### [Claude] 내보내기 크기 입력 자유화 + 배경 포함 동작 개선
+- `EditorView.vue`: 크기 입력 핸들러에서 즉시 클램핑 제거 → 자유 입력 가능, 비율 유지 시 자동 계산 유지
+- `GridCanvas.vue`: 배경 미포함 시 그리드 레이어 전체(배경색+격자선/점) 숨기고 흰색 배경 합성
+- `npm run build` 통과
+
 ### 2026-03-03
 
 #### [Claude] 우클릭/색상/내보내기 Phase 1 기반 구현

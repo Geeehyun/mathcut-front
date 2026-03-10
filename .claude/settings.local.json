@@ -13,7 +13,9 @@
       "Bash(cmd.exe /c \"python -c \"\"import openpyxl; print\\(''ok''\\)\"\"\")",
       "Bash(cmd.exe /c \"python -c \"\"print\\(''hello''\\)\"\" 2>&1\")",
       "Bash(node -e:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(find \"D:\\\\vision\\\\mathcut-front\\\\src\" -name \"*.ts\" -o -name \"*.vue\" | xargs grep -l \"getRightAngleMarkerPoints\\\\|isRightAngleByThreePoints\" | head -10)",
+      "Bash(grep -r \"getRightAngleMarkerPoints\\\\|isRightAngleByThreePoints\" \"D:/vision/mathcut-front/src\" --include=\"*.ts\" --include=\"*.vue\" 2>/dev/null | head -20)"
     ]
   }
 }

@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useToolStore } from '@/stores/tool'
 import { useCanvasStore } from '@/stores/canvas'
 import GridCanvas from '@/components/canvas/GridCanvas.vue'
@@ -20,11 +20,43 @@ const mousePos = ref<{ x: number, y: number } | null>(null)
 type CutSnapshot = { shapes: Shape[], guides: Guide[] }
 const cuts = ref<CutSnapshot[]>([{ shapes: [], guides: [] }])
 const currentCutIndex = ref(0)
+const MAX_CANVAS_COUNT = 10
 
-const exportFormat = ref<'png' | 'pdf'>('png')
+const EXPORT_MIN_PX = 100
+const EXPORT_MAX_PX = 10000
+const EXPORT_DEFAULT_WIDTH = GRID_CONFIG.size * GRID_CONFIG.width   // 1280
+const EXPORT_DEFAULT_HEIGHT = GRID_CONFIG.size * GRID_CONFIG.height  // 720
+
+const exportFormat = ref<'png' | 'pdf' | 'svg'>('png')
 const exportDpi = ref<72 | 150 | 300>(300)
-const exportWidth = ref(GRID_CONFIG.size * GRID_CONFIG.width)
-const exportHeight = ref(GRID_CONFIG.size * GRID_CONFIG.height)
+const exportWidth = ref(EXPORT_DEFAULT_WIDTH)
+const exportHeight = ref(EXPORT_DEFAULT_HEIGHT)
+const exportIncludeBackground = ref(true)
+const exportFileName = ref('mathcut')
+const exportModalOpen = ref(false)
+const exportKeepAspect = ref(true)
+const exportAspectRatio = ref(exportWidth.value / exportHeight.value)
+
+const exportSizeError = computed(() => {
+  const w = exportWidth.value
+  const h = exportHeight.value
+  if (!w || !h || w <= 0 || h <= 0) return '0 이하의 값은 입력할 수 없습니다'
+  if (w < EXPORT_MIN_PX || h < EXPORT_MIN_PX) return `최소 ${EXPORT_MIN_PX}px 이상 입력하세요`
+  if (w > EXPORT_MAX_PX || h > EXPORT_MAX_PX) return `최대 ${EXPORT_MAX_PX.toLocaleString()}px까지 입력 가능합니다`
+  return ''
+})
+
+const exportAspectDisplay = computed(() => {
+  const w = Math.round(exportWidth.value || 0)
+  const h = Math.round(exportHeight.value || 0)
+  if (!w || !h || w <= 0 || h <= 0) return ''
+  function gcd(a: number, b: number): number { return b === 0 ? a : gcd(b, a % b) }
+  const d = gcd(w, h)
+  const rw = w / d
+  const rh = h / d
+  if (rw <= 32 && rh <= 32) return `${rw}:${rh}`
+  return `${(w / h).toFixed(2)}:1`
+})
 const contextmenuState = ref<{
   visible: boolean
   x: number
@@ -49,7 +81,19 @@ function syncCurrentCut() {
   cuts.value[currentCutIndex.value] = cloneSnapshot(canvasStore.getSnapshot())
 }
 
+function hasSnapshotElements(snapshot: CutSnapshot): boolean {
+  return snapshot.shapes.length > 0 || snapshot.guides.length > 0
+}
+
+function showMaxCanvasAlert() {
+  window.alert('최대 10개까지만 캔버스를 추가할 수 있습니다.')
+}
+
 function addCut() {
+  if (cuts.value.length >= MAX_CANVAS_COUNT) {
+    showMaxCanvasAlert()
+    return
+  }
   syncCurrentCut()
   cuts.value.push({ shapes: [], guides: [] })
   currentCutIndex.value = cuts.value.length - 1
@@ -57,6 +101,10 @@ function addCut() {
 }
 
 function duplicateCut() {
+  if (cuts.value.length >= MAX_CANVAS_COUNT) {
+    showMaxCanvasAlert()
+    return
+  }
   syncCurrentCut()
   cuts.value.push(cloneSnapshot(cuts.value[currentCutIndex.value]))
   currentCutIndex.value = cuts.value.length - 1
@@ -64,6 +112,12 @@ function duplicateCut() {
 }
 
 function deleteCut() {
+  syncCurrentCut()
+  const targetSnapshot = cuts.value[currentCutIndex.value]
+  if (hasSnapshotElements(targetSnapshot)) {
+    const shouldDelete = window.confirm('작업중인 요소가 있습니다. 해당 캔버스를 삭제하시겠습니까?')
+    if (!shouldDelete) return
+  }
   if (cuts.value.length <= 1) {
     cuts.value[0] = { shapes: [], guides: [] }
     canvasStore.loadSnapshot({ shapes: [], guides: [] })
@@ -75,8 +129,66 @@ function deleteCut() {
 }
 
 function handleExport() {
-  gridCanvasRef.value?.exportImage(exportFormat.value, exportWidth.value, exportHeight.value, exportDpi.value)
+  gridCanvasRef.value?.exportImage(
+    exportFormat.value,
+    exportWidth.value,
+    exportHeight.value,
+    exportDpi.value,
+    {
+      fileName: exportFileName.value,
+      includeBackground: exportIncludeBackground.value
+    }
+  )
 }
+
+function openExportModal() {
+  exportAspectRatio.value = Math.max(0.01, exportWidth.value / Math.max(1, exportHeight.value))
+  exportModalOpen.value = true
+}
+
+function closeExportModal() {
+  exportModalOpen.value = false
+}
+
+async function confirmExport() {
+  if (exportSizeError.value) return
+  exportWidth.value = Math.min(EXPORT_MAX_PX, Math.max(EXPORT_MIN_PX, Math.round(exportWidth.value)))
+  exportHeight.value = Math.min(EXPORT_MAX_PX, Math.max(EXPORT_MIN_PX, Math.round(exportHeight.value)))
+  // 선택 효과(그림자·핸들)가 이미지에 포함되지 않도록 선택 해제 후 Vue→Konva 반응성 갱신 대기
+  canvasStore.selectShape(null)
+  await nextTick()
+  handleExport()
+  closeExportModal()
+}
+
+function resetExportSize() {
+  exportWidth.value = EXPORT_DEFAULT_WIDTH
+  exportHeight.value = EXPORT_DEFAULT_HEIGHT
+  exportAspectRatio.value = EXPORT_DEFAULT_WIDTH / EXPORT_DEFAULT_HEIGHT
+}
+
+function setExportPreset(w: number, h: number) {
+  exportWidth.value = w
+  exportHeight.value = h
+  exportAspectRatio.value = w / h
+}
+
+function handleExportWidthInput() {
+  if (exportKeepAspect.value && exportWidth.value > 0) {
+    exportHeight.value = Math.round(exportWidth.value / Math.max(0.01, exportAspectRatio.value))
+  }
+}
+
+function handleExportHeightInput() {
+  if (exportKeepAspect.value && exportHeight.value > 0) {
+    exportWidth.value = Math.round(exportHeight.value * Math.max(0.01, exportAspectRatio.value))
+  }
+}
+
+watch(exportKeepAspect, (enabled) => {
+  if (!enabled) return
+  exportAspectRatio.value = Math.max(0.01, exportWidth.value / Math.max(1, exportHeight.value))
+})
 
 function handleCanvasContextMenu(payload: {
   x: number
@@ -702,33 +814,30 @@ onUnmounted(() => {
 
       <!-- 以?-->
       <div class="flex items-center gap-1">
-        <button class="chrome-btn" @click="toolStore.zoomOut" title="축소">-</button>
+        <button
+          class="chrome-btn"
+          :disabled="toolStore.zoom <= 100"
+          :class="toolStore.zoom <= 100 ? 'opacity-30 cursor-not-allowed' : ''"
+          @click="toolStore.zoomOut"
+          title="축소"
+        >-</button>
         <span class="text-xs text-gray-300 min-w-[2.5rem] text-center">{{ toolStore.zoom }}%</span>
-        <button class="chrome-btn" @click="toolStore.zoomIn" title="확대">+</button>
+        <button
+          class="chrome-btn"
+          :disabled="toolStore.zoom >= 200"
+          :class="toolStore.zoom >= 200 ? 'opacity-30 cursor-not-allowed' : ''"
+          @click="toolStore.zoomIn"
+          title="확대"
+        >+</button>
       </div>
 
       <div class="w-px h-5 bg-gray-700"></div>
 
       <!-- ?대낫?닿린 -->
       <div class="flex items-center gap-1">
-        <select
-          v-model="exportFormat"
-          class="text-xs bg-gray-800 text-gray-300 border border-gray-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
-        >
-          <option value="png">PNG</option>
-          <option value="pdf">PDF</option>
-        </select>
-        <select
-          v-model.number="exportDpi"
-          class="text-xs bg-gray-800 text-gray-300 border border-gray-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
-        >
-          <option :value="72">72dpi</option>
-          <option :value="150">150dpi</option>
-          <option :value="300">300dpi</option>
-        </select>
         <button
           class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition font-medium"
-          @click="handleExport"
+          @click="openExportModal"
         >내보내기</button>
       </div>
 
@@ -925,6 +1034,118 @@ onUnmounted(() => {
           :title="rightPanelOpen ? '패널 닫기' : '패널 열기'"
         >{{ rightPanelOpen ? '▶' : '◀' }}</button>
 
+      </div>
+    </div>
+
+    <div
+      v-if="exportModalOpen"
+      class="absolute inset-0 z-40 bg-black/30 flex items-center justify-center"
+      @click.self="closeExportModal"
+    >
+      <div class="w-[360px] max-w-[92vw] bg-white rounded-xl shadow-2xl border border-gray-200 p-4">
+        <h3 class="text-sm font-semibold text-gray-800 mb-3">이미지 내보내기</h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-gray-500 mb-1 block">파일 형식</label>
+            <select v-model="exportFormat" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">
+              <option value="png">PNG</option>
+              <option value="pdf">PDF</option>
+              <option value="svg">SVG</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500 mb-1 block">파일명</label>
+            <input
+              v-model.trim="exportFileName"
+              type="text"
+              class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+              placeholder="mathcut"
+            >
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs text-gray-500">이미지 크기 (px)</label>
+              <button
+                class="text-xs text-blue-500 hover:text-blue-700 underline"
+                @click="resetExportSize"
+                title="기본값으로 초기화 (1280×720)"
+              >초기화</button>
+            </div>
+            <!-- 권장 프리셋 -->
+            <div class="flex gap-1 mb-2">
+              <button
+                v-for="preset in [{ label: '720p', w: 1280, h: 720 }, { label: '1080p', w: 1920, h: 1080 }, { label: '2K', w: 2560, h: 1440 }]"
+                :key="preset.label"
+                class="flex-1 text-xs py-0.5 rounded border transition"
+                :class="exportWidth === preset.w && exportHeight === preset.h
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-white text-gray-500 border-gray-300 hover:border-blue-400 hover:text-blue-500'"
+                @click="setExportPreset(preset.w, preset.h)"
+              >{{ preset.label }}</button>
+            </div>
+            <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
+              <input
+                v-model.number="exportWidth"
+                type="number"
+                class="text-sm border rounded px-2 py-1.5 focus:outline-none transition w-full"
+                :class="exportSizeError ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'"
+                placeholder="너비"
+                @input="handleExportWidthInput"
+              >
+              <span class="text-xs text-gray-400 text-center">×</span>
+              <input
+                v-model.number="exportHeight"
+                type="number"
+                class="text-sm border rounded px-2 py-1.5 focus:outline-none transition w-full"
+                :class="exportSizeError ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'"
+                placeholder="높이"
+                @input="handleExportHeightInput"
+              >
+            </div>
+            <!-- 검증 메시지 / 비율 표시 -->
+            <div class="mt-1 min-h-[1.2rem]">
+              <p v-if="exportSizeError" class="text-xs text-red-500">{{ exportSizeError }}</p>
+              <p v-else-if="exportAspectDisplay" class="text-xs text-gray-400">
+                비율 {{ exportAspectDisplay }}
+                <span class="ml-1 text-gray-300">· 권장 최소 {{ EXPORT_MIN_PX }}px, 최대 {{ EXPORT_MAX_PX.toLocaleString() }}px</span>
+              </p>
+            </div>
+            <label class="mt-1.5 flex items-center gap-2 text-xs text-gray-600">
+              <input v-model="exportKeepAspect" type="checkbox">
+              <span>비율 유지</span>
+            </label>
+          </div>
+          <!-- SVG: 벡터 안내 / PNG·PDF: 해상도 선택 -->
+          <div v-if="exportFormat === 'svg'" class="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-600">
+            SVG는 벡터 형식으로 어떤 크기로 출력해도 항상 선명합니다. 해상도 설정이 필요 없습니다.
+          </div>
+          <div v-else>
+            <label class="text-xs text-gray-500 mb-1 block">해상도 (DPI)</label>
+            <select v-model.number="exportDpi" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">
+              <option :value="72">72 DPI — 화면 표시·웹용 (파일 작음)</option>
+              <option :value="150">150 DPI — 일반 출력·문서용</option>
+              <option :value="300">300 DPI — 고품질 인쇄 (권장)</option>
+            </select>
+            <p class="mt-1 text-xs text-gray-400">
+              <template v-if="exportDpi === 72">화면 표시 수준의 해상도입니다. 인쇄 시 계단 현상이 생길 수 있습니다.</template>
+              <template v-else-if="exportDpi === 150">일반 프린터 출력에 적합합니다.</template>
+              <template v-else>인쇄용 고품질 렌더링입니다. PNG·PDF 파일이 커질 수 있습니다.</template>
+            </p>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input v-model="exportIncludeBackground" type="checkbox">
+            <span>배경 포함</span>
+          </label>
+        </div>
+        <div class="mt-4 flex justify-end gap-2">
+          <button class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50" @click="closeExportModal">취소</button>
+          <button
+            class="px-3 py-1.5 text-sm rounded transition"
+            :class="exportSizeError ? 'bg-gray-300 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'"
+            :disabled="!!exportSizeError"
+            @click="confirmExport"
+          >내보내기</button>
+        </div>
       </div>
     </div>
 
