@@ -49,6 +49,15 @@
 
 > 최신순 정렬. 상세 내용은 `logs/` 참조.
 
+### 2026-03-10 (세션 2)
+
+#### [Claude] 내보내기 출판 품질 개선 4종 (A·B·F·D)
+- **A: 흑백 내보내기** — PNG/PDF 픽셀 변환(Rec.709), SVG feColorMatrix 필터, 체크박스 UI
+- **B: 600 DPI** — select 옵션 추가, 메모리 경고 computed, try-catch 렌더링 실패 처리
+- **F: 출판 안내 문구** — 포맷별 CMYK/PDF-X/SVG Illustrator 안내 텍스트 추가
+- **D: SVG 폰트 임베딩** — KaTeX_Main Regular·Bold woff2 base64 embed, async generateVectorSVG, 폰트 임베딩 체크박스(SVG 전용)
+- `npm run build` 통과
+
 ### 2026-03-10
 
 #### [Claude] 내보내기 해상도(DPI) 가이드 UI 개선

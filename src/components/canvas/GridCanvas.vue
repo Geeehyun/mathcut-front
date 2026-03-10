@@ -32,6 +32,18 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import jsPDF from 'jspdf'
 import { formatMathText } from '@/utils/mathText'
 import katex from 'katex'
+import katexMainRegularUrl from 'katex/dist/fonts/KaTeX_Main-Regular.woff2?url'
+import katexMainBoldUrl from 'katex/dist/fonts/KaTeX_Main-Bold.woff2?url'
+
+/** 폰트 URL을 fetch해 base64 data URI로 변환 (SVG 임베딩용) */
+async function fetchFontAsBase64(url: string): Promise<string> {
+  const res = await fetch(url)
+  const buf = await res.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return `data:font/woff2;base64,${btoa(bin)}`
+}
 
 const toolStore = useToolStore()
 const canvasStore = useCanvasStore()
@@ -3324,7 +3336,7 @@ function svgUnitText(
   ]
 }
 
-function generateVectorSVG(exportW: number, exportH: number, includeBackground: boolean): string {
+async function generateVectorSVG(exportW: number, exportH: number, includeBackground: boolean, grayscale = false, embedFonts = false): Promise<string> {
   const sw = stageWidth.value
   const sh = stageHeight.value
   const els: string[] = []
@@ -3625,16 +3637,40 @@ function generateVectorSVG(exportW: number, exportH: number, includeBackground: 
     }
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${exportW}" height="${exportH}" viewBox="0 0 ${sw} ${sh}">\n${els.join('\n')}\n</svg>`
+  // defs: 폰트 임베딩 + 흑백 필터
+  const defsItems: string[] = []
+  if (embedFonts) {
+    try {
+      const [regularB64, boldB64] = await Promise.all([
+        fetchFontAsBase64(katexMainRegularUrl),
+        fetchFontAsBase64(katexMainBoldUrl),
+      ])
+      defsItems.push(
+        `<style>@font-face{font-family:'KaTeX_Main';font-weight:400;src:url('${regularB64}') format('woff2');}` +
+        `@font-face{font-family:'KaTeX_Main';font-weight:700;src:url('${boldB64}') format('woff2');}</style>`
+      )
+    } catch (e) {
+      console.warn('[SVG] 폰트 임베딩 실패, 폴백 사용:', e)
+    }
+  }
+  if (grayscale) {
+    defsItems.push(`<filter id="gs"><feColorMatrix type="saturate" values="0"/></filter>`)
+  }
+  const defsStr = defsItems.length ? `<defs>\n${defsItems.join('\n')}\n</defs>` : ''
+  const body = grayscale
+    ? `<g filter="url(#gs)">\n${els.join('\n')}\n</g>`
+    : els.join('\n')
+  const inner = [defsStr, body].filter(Boolean).join('\n')
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${exportW}" height="${exportH}" viewBox="0 0 ${sw} ${sh}">\n${inner}\n</svg>`
 }
 
-function exportImage(
+async function exportImage(
   format: 'png' | 'pdf' | 'svg',
   width: number,
   height: number,
   dpi: number = 300,
-  options?: { fileName?: string, includeBackground?: boolean }
-): boolean {
+  options?: { fileName?: string, includeBackground?: boolean, grayscale?: boolean, embedFonts?: boolean }
+): Promise<boolean> {
   const stage = stageRef.value?.getNode?.()
   if (!stage) return false
   const w = Math.max(100, width || canvasWidth)
@@ -3647,6 +3683,8 @@ function exportImage(
     ? Math.max(w / canvasWidth, h / canvasHeight, 0.2)
     : dpiScale
   const includeBackground = options?.includeBackground !== false
+  const grayscale = options?.grayscale === true
+  const embedFonts = options?.embedFonts === true
   const baseName = sanitizeFilename(options?.fileName || '')
   // 그리드 레이어 전체(배경색 rect + 격자선/점)를 export-bg로부터 찾아 제어
   const backgroundNode = stage.findOne('.export-bg') as any
@@ -3656,26 +3694,47 @@ function exportImage(
     gridLayer.visible(false)
     stage.draw()
   }
-  const sourceCanvas = stage.toCanvas({ pixelRatio })
-  const outputCanvas = document.createElement('canvas')
-  outputCanvas.width = w
-  outputCanvas.height = h
-  const outputCtx = outputCanvas.getContext('2d')
-  if (!outputCtx) return false
-  outputCtx.imageSmoothingEnabled = true
-  outputCtx.imageSmoothingQuality = 'high'
-  outputCtx.clearRect(0, 0, w, h)
-  // 배경 미포함 시 흰색으로 채운 뒤 도형만 합성
-  if (!includeBackground) {
-    outputCtx.fillStyle = '#FFFFFF'
-    outputCtx.fillRect(0, 0, w, h)
+  let pngDataUrl: string
+  try {
+    const sourceCanvas = stage.toCanvas({ pixelRatio })
+    const outputCanvas = document.createElement('canvas')
+    outputCanvas.width = w
+    outputCanvas.height = h
+    const outputCtx = outputCanvas.getContext('2d')
+    if (!outputCtx) throw new Error('2d context unavailable')
+    outputCtx.imageSmoothingEnabled = true
+    outputCtx.imageSmoothingQuality = 'high'
+    outputCtx.clearRect(0, 0, w, h)
+    // 배경 미포함 시 흰색으로 채운 뒤 도형만 합성
+    if (!includeBackground) {
+      outputCtx.fillStyle = '#FFFFFF'
+      outputCtx.fillRect(0, 0, w, h)
+    }
+    // 소스에서 그리드 영역(canvasWidth × canvasHeight)만 크롭 후 출력 캔버스에 맞게 그리기
+    // → 스테이지가 창 전체를 덮어도 그리드 밖 여백이 출력에 포함/왜곡되지 않음
+    const srcW = Math.round(canvasWidth * pixelRatio)
+    const srcH = Math.round(canvasHeight * pixelRatio)
+    outputCtx.drawImage(sourceCanvas, 0, 0, srcW, srcH, 0, 0, w, h)
+    // 흑백 변환: Rec.709 휘도 공식으로 각 픽셀을 회색으로 변환
+    if (grayscale) {
+      const imageData = outputCtx.getImageData(0, 0, w, h)
+      const d = imageData.data
+      for (let i = 0; i < d.length; i += 4) {
+        const luma = Math.round(d[i] * 0.2126 + d[i + 1] * 0.7152 + d[i + 2] * 0.0722)
+        d[i] = luma; d[i + 1] = luma; d[i + 2] = luma
+      }
+      outputCtx.putImageData(imageData, 0, 0)
+    }
+    pngDataUrl = outputCanvas.toDataURL('image/png')
+  } catch (err) {
+    console.error('[exportImage] 렌더링 실패:', err)
+    alert('이미지 렌더링에 실패했습니다. 해상도를 낮추거나 이미지 크기를 줄여 다시 시도해 주세요.')
+    if (gridLayer && !includeBackground) {
+      gridLayer.visible(prevGridLayerVisible)
+      stage.draw()
+    }
+    return false
   }
-  // 소스에서 그리드 영역(canvasWidth × canvasHeight)만 크롭 후 출력 캔버스에 맞게 그리기
-  // → 스테이지가 창 전체를 덮어도 그리드 밖 여백이 출력에 포함/왜곡되지 않음
-  const srcW = Math.round(canvasWidth * pixelRatio)
-  const srcH = Math.round(canvasHeight * pixelRatio)
-  outputCtx.drawImage(sourceCanvas, 0, 0, srcW, srcH, 0, 0, w, h)
-  const pngDataUrl = outputCanvas.toDataURL('image/png')
   if (gridLayer && !includeBackground) {
     gridLayer.visible(prevGridLayerVisible)
     stage.draw()
@@ -3699,7 +3758,7 @@ function exportImage(
   }
 
   // 진짜 벡터 SVG 생성 (viewBox로 어떤 크기에서도 선명)
-  const svgContent = generateVectorSVG(w, h, includeBackground)
+  const svgContent = await generateVectorSVG(w, h, includeBackground, grayscale, embedFonts)
   const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

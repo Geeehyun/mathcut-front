@@ -28,10 +28,12 @@ const EXPORT_DEFAULT_WIDTH = GRID_CONFIG.size * GRID_CONFIG.width   // 1280
 const EXPORT_DEFAULT_HEIGHT = GRID_CONFIG.size * GRID_CONFIG.height  // 720
 
 const exportFormat = ref<'png' | 'pdf' | 'svg'>('png')
-const exportDpi = ref<72 | 150 | 300>(300)
+const exportDpi = ref<number>(300)
 const exportWidth = ref(EXPORT_DEFAULT_WIDTH)
 const exportHeight = ref(EXPORT_DEFAULT_HEIGHT)
 const exportIncludeBackground = ref(true)
+const exportGrayscale = ref(false)
+const exportEmbedFonts = ref(false)
 const exportFileName = ref('mathcut')
 const exportModalOpen = ref(false)
 const exportKeepAspect = ref(true)
@@ -43,6 +45,22 @@ const exportSizeError = computed(() => {
   if (!w || !h || w <= 0 || h <= 0) return '0 이하의 값은 입력할 수 없습니다'
   if (w < EXPORT_MIN_PX || h < EXPORT_MIN_PX) return `최소 ${EXPORT_MIN_PX}px 이상 입력하세요`
   if (w > EXPORT_MAX_PX || h > EXPORT_MAX_PX) return `최대 ${EXPORT_MAX_PX.toLocaleString()}px까지 입력 가능합니다`
+  return ''
+})
+
+// 출력 픽셀 수가 매우 크면 메모리 경고 (대략 3200만 픽셀 이상)
+const exportMemoryWarning = computed(() => {
+  if (exportFormat.value === 'svg') return ''
+  const dpiScale = Math.max(1, exportDpi.value / 96)
+  const isDownscaling = exportWidth.value < 1280 || exportHeight.value < 720
+  const ratio = isDownscaling
+    ? Math.max(exportWidth.value / 1280, exportHeight.value / 720, 0.2)
+    : dpiScale
+  const renderW = Math.round(1280 * ratio)
+  const renderH = Math.round(720 * ratio)
+  const totalPx = renderW * renderH
+  if (totalPx > 32_000_000) return `렌더링 크기가 매우 큽니다 (약 ${Math.round(totalPx / 1_000_000)}MP). 메모리 부족으로 실패할 수 있습니다.`
+  if (totalPx > 16_000_000) return `렌더링 크기가 큽니다 (약 ${Math.round(totalPx / 1_000_000)}MP). 시간이 걸릴 수 있습니다.`
   return ''
 })
 
@@ -128,15 +146,17 @@ function deleteCut() {
   canvasStore.loadSnapshot(cloneSnapshot(cuts.value[currentCutIndex.value]))
 }
 
-function handleExport() {
-  gridCanvasRef.value?.exportImage(
+async function handleExport() {
+  await gridCanvasRef.value?.exportImage(
     exportFormat.value,
     exportWidth.value,
     exportHeight.value,
     exportDpi.value,
     {
       fileName: exportFileName.value,
-      includeBackground: exportIncludeBackground.value
+      includeBackground: exportIncludeBackground.value,
+      grayscale: exportGrayscale.value,
+      embedFonts: exportEmbedFonts.value,
     }
   )
 }
@@ -1048,10 +1068,20 @@ onUnmounted(() => {
           <div>
             <label class="text-xs text-gray-500 mb-1 block">파일 형식</label>
             <select v-model="exportFormat" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">
-              <option value="png">PNG</option>
-              <option value="pdf">PDF</option>
-              <option value="svg">SVG</option>
+              <option value="png">PNG — 래스터 이미지 (범용)</option>
+              <option value="pdf">PDF — 인쇄·문서용</option>
+              <option value="svg">SVG — 벡터 (편집 가능)</option>
             </select>
+            <!-- 포맷별 출판 안내 -->
+            <p v-if="exportFormat === 'png'" class="mt-1 text-xs text-gray-400">
+              PNG는 RGB 색상입니다. 출판사 제출 시 Illustrator·Photoshop에서 CMYK로 변환하세요.
+            </p>
+            <p v-else-if="exportFormat === 'pdf'" class="mt-1 text-xs text-gray-400">
+              PDF는 RGB 기반으로 생성됩니다. 교과서·출판물용은 Acrobat 등으로 PDF/X-1a 또는 PDF/X-4 규격으로 변환 후 제출하세요.
+            </p>
+            <p v-else class="mt-1 text-xs text-gray-400">
+              SVG는 텍스트 기반 벡터 파일입니다. Illustrator·Inkscape에서 열어 색상 프로파일 설정 및 아웃라인화 후 사용하세요.
+            </p>
           </div>
           <div>
             <label class="text-xs text-gray-500 mb-1 block">파일명</label>
@@ -1125,16 +1155,27 @@ onUnmounted(() => {
               <option :value="72">72 DPI — 화면 표시·웹용 (파일 작음)</option>
               <option :value="150">150 DPI — 일반 출력·문서용</option>
               <option :value="300">300 DPI — 고품질 인쇄 (권장)</option>
+              <option :value="600">600 DPI — 최고품질 인쇄 (파일 매우 큼)</option>
             </select>
             <p class="mt-1 text-xs text-gray-400">
               <template v-if="exportDpi === 72">화면 표시 수준의 해상도입니다. 인쇄 시 계단 현상이 생길 수 있습니다.</template>
               <template v-else-if="exportDpi === 150">일반 프린터 출력에 적합합니다.</template>
-              <template v-else>인쇄용 고품질 렌더링입니다. PNG·PDF 파일이 커질 수 있습니다.</template>
+              <template v-else-if="exportDpi === 300">인쇄용 고품질 렌더링입니다. PNG·PDF 파일이 커질 수 있습니다.</template>
+              <template v-else>교과서·출판물 인쇄에 권장하는 최고 품질입니다. 렌더링이 오래 걸릴 수 있습니다.</template>
             </p>
+            <p v-if="exportMemoryWarning" class="mt-1 text-xs text-amber-600">⚠ {{ exportMemoryWarning }}</p>
           </div>
           <label class="flex items-center gap-2 text-sm text-gray-700">
             <input v-model="exportIncludeBackground" type="checkbox">
             <span>배경 포함</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input v-model="exportGrayscale" type="checkbox">
+            <span>흑백으로 내보내기</span>
+          </label>
+          <label v-if="exportFormat === 'svg'" class="flex items-center gap-2 text-sm text-gray-700">
+            <input v-model="exportEmbedFonts" type="checkbox">
+            <span>폰트 임베딩 <span class="text-xs text-gray-400">(SVG 단독 배포 시 권장)</span></span>
           </label>
         </div>
         <div class="mt-4 flex justify-end gap-2">
