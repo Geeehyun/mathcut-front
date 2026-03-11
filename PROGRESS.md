@@ -1,6 +1,6 @@
 # MathCut 업무 진행사항
 
-**마지막 업데이트**: 2026-03-03
+**마지막 업데이트**: 2026-03-11
 
 ---
 
@@ -41,13 +41,72 @@
 |------|------|--------|
 | 1단계: 프론트엔드 MVP | 🟢 진행 중 | 96% |
 | 2단계: 백엔드 연동 | ⚪ 대기 | 0% |
-| 3단계: AI 기능 | ⚪ 대기 | 0% |
+| 3단계: AI 기능 | 🟢 진행 중 | 20% |
 
 ---
 
 ## 작업 로그
 
 > 최신순 정렬. 상세 내용은 `logs/` 참조.
+
+### 2026-03-11
+
+#### [Claude] AI 스케치 일반 삼각형 밑변 수평 정렬
+- `useAISketch.ts`: `alignTriangleBase` 추가 — SSS 보정 후 가장 수평에 가까운 변을 기준으로 무게중심 회전, 45° 초과 기울기는 보존
+
+### 2026-03-13 (2차)
+
+#### [Claude] AI 스케치 좌표 스케일 보정 (전 도형 공통)
+- `useAISketch.ts`: `applyAnnotatedTriangleLengths` 추가 — SSS 구성법으로 삼각형 꼭짓점 좌표 자동 보정 (triangle, isosceles, equilateral)
+- `useAISketch.ts`: `applyAnnotatedSegmentLength` 추가 — segment/ray/line/arrow 길이 보정
+- `useAISketch.ts`: `applyAnnotatedRectangleLengths` 추가 — rect-rectangle/rect-square 너비·높이 보정
+- `useAISketch.ts`: `convertToCanvasShape`에서 triangle-right 외 모든 도형에 `applyAnnotatedGeneralLengths` 적용
+- `useAISketch.ts`: 이등변삼각형 좌표 배치 워크플로 프롬프트 추가 (다리/밑변/높이 계산 예시)
+- `aiSketchExamples.ts`: `EXAMPLE_TRIANGLE_ISOSCELES` 신규 추가 (legs=6, base=4, angle=ㄷ만, 높이 표시)
+- `npm run build` 통과
+
+### 2026-03-13
+
+#### [Claude] AI 스케치 프롬프트 4차 수정 + 모달 UI 개선
+- `useAISketch.ts`: 원 중심 레이블 불명확 시 "ㅇ" 기본값 규칙 추가
+- `useAISketch.ts`: □ 블랭크 모든 도형 lengthItems/angleItems에 적용 명시
+- `useAISketch.ts`: 정삼각형 좌표 스케일 워크플로 (5cm=5 grid units), 엣지 인덱스 검증 단계 추가
+- `useAISketch.ts`: CW/CCW 강제 규칙 제거 → 이미지 실제 레이블 위치 우선 읽기
+- `useAISketch.ts`: detached 기본값=false, 이미지/힌트에 화살표 명시 시에만 true
+- `aiSketchExamples.ts`: `EXAMPLE_TRIANGLE_EQUILATERAL` 신규 추가 (CW, lengthItems[2]=5cm visible, angleItems[1]=blank)
+- `aiSketchExamples.ts`: `EXAMPLE_CIRCLE` 업데이트 (pointLabels:['ㅇ'], point:true, radius=3cm)
+- `AISketchModal.vue`: 도형별 힌트 예시 업데이트, placeholder 동적 바인딩
+- `AISketchModal.vue`: 모달 2열 레이아웃 (좌: 캔버스, 우: 도형선택+힌트+팁박스), 폭 760→960px
+- `npm run build` 통과
+
+### 2026-03-12
+
+#### [Claude] AI 스케치 프롬프트 3차 수정 + 빈칸 도구 추가
+- `useAISketch.ts`: triangle-right 예시 각도 오류 수정 (angleItems[1]에 90° 잘못 표기 → 직각 꼭짓점 C(index 2)에 visible:false)
+- `useAISketch.ts`: 직각삼각형 3케이스 빗변 룩업 테이블 추가 (r=0/1/2 모두 명시)
+- `useAISketch.ts`: 90° 꼭짓점 angleItems visible:false 규칙 추가 (직각 마커 자동 렌더, text 억제)
+- `useAISketch.ts`: detached:true 제거 → textMode:"blank" 연결 가이드로 변경
+- `useGuide.ts`: `completeBlankBoxGuide()` 추가 (클릭 위치 중심으로 기본 크기 빈칸 박스 생성)
+- `AppSidebar.vue`: 기타 플라이아웃에 "빈칸(⬚)" 버튼 추가
+- `npm run build` 통과
+
+### 2026-03-11
+
+#### [Codex] AI 스케치 MVP 구현
+- `src/components/AISketchModal.vue` 추가: 직접 그리기/이미지 업로드 탭, 프리핸드 캔버스, 업로드 미리보기, AI 변환 UI 구현
+- `src/composables/useAISketch.ts` 추가: 브라우저에서 OpenAI API 직접 호출, 응답 파싱/normalize, Shape/Guide 변환 구현
+- `src/stores/canvas.ts`에 `importAISketchResult()` 추가: AI 결과를 undo 1회로 일괄 반영
+- `src/views/EditorView.vue`에 `AI 스케치` 버튼과 모달 연동 추가
+- 사용자 선택 도형 타입을 AI 요청에 함께 보내고, 자유 텍스트 힌트를 추가로 전달하도록 수정
+- AI 스케치 모달에 내부 스크롤을 넣어 작은 화면에서도 넘치지 않게 조정
+- `.env.example` 추가, `npm run build` 통과
+
+#### [Codex] AI 스케치 연동 계획 검토 및 보완
+- `TODO/AI_SKETCH.md`를 현재 코드베이스 기준으로 재검토해 구현 전제 수정
+- 프론트 OpenAI 직접 호출 계획을 `백엔드 endpoint + Responses API + Structured Outputs` 기준으로 교체
+- AI 결과 반영 방식을 `addShape/addGuide` 반복 호출 대신 `canvasStore.importAISketchResult()` batch import 기준으로 보완
+- 좌표 clamp, 응답 validate, undo 히스토리, 에러 처리, 운영/보안 체크리스트 추가
+- 아직 기능 구현은 시작하지 않았고, 구현 진입 전 문서 기준선을 먼저 정리한 상태
 
 ### 2026-03-10 (세션 2)
 
