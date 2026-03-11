@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue'
-import katex from 'katex'
 import type { Point, Shape, ShapeGuideItemStyle } from '@/types'
 import type { useCanvasStore } from '@/stores/canvas'
 import type { useToolStore } from '@/stores/tool'
+import { renderLatexLikeHtml } from '@/utils/latexText'
 
 interface TextInputState {
   point: Point
@@ -93,31 +93,24 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
     return globalPointLabelMap.value[`${shapeId}-${pointIndex}`] ?? getPointLabel(pointIndex)
   }
 
-  function renderLatexHtml(input: string): string {
-    return katex.renderToString(input || '', {
-      throwOnError: false,
-      displayMode: false
-    })
-  }
-
   function openTextInput(point: Point, rawX: number, rawY: number) {
     textInputState.value = { point, rawX, rawY }
     textInputValue.value = ''
-    textInputUseLatex.value = false
+    textInputUseLatex.value = true
   }
 
   function confirmTextInput() {
     if (!textInputState.value) return
-    createTextGuide(textInputState.value.point, textInputValue.value.trim() || 'A', textInputUseLatex.value)
+    createTextGuide(textInputState.value.point, textInputValue.value.trim() || 'A', true)
     textInputState.value = null
     textInputValue.value = ''
-    textInputUseLatex.value = false
+    textInputUseLatex.value = true
   }
 
   function cancelTextInput() {
     textInputState.value = null
     textInputValue.value = ''
-    textInputUseLatex.value = false
+    textInputUseLatex.value = true
   }
 
   function startTextGuideEdit(guideId: string) {
@@ -130,7 +123,7 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       rawY: anchor.y + 6
     }
     textGuideValue.value = guide.text || 'A'
-    textGuideUseLatex.value = !!guide.useLatex
+    textGuideUseLatex.value = true
   }
 
   function confirmTextGuideEdit() {
@@ -140,17 +133,17 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
     canvasStore.updateGuide(state.guideId, (guide) => ({
       ...guide,
       text: value || 'A',
-      useLatex: textGuideUseLatex.value
+      useLatex: true
     }))
     textGuideEditState.value = null
     textGuideValue.value = ''
-    textGuideUseLatex.value = false
+    textGuideUseLatex.value = true
   }
 
   function cancelTextGuideEdit() {
     textGuideEditState.value = null
     textGuideValue.value = ''
-    textGuideUseLatex.value = false
+    textGuideUseLatex.value = true
   }
 
   function startPointLabelEdit(shape: Shape, pointIndex: number) {
@@ -163,7 +156,7 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       rawY: point.y + 6
     }
     pointLabelValue.value = shape.pointLabels?.[pointIndex] ?? getGlobalPointLabel(shape.id, pointIndex)
-    pointLabelUseLatex.value = !!shape.pointLabelLatex?.[pointIndex]
+    pointLabelUseLatex.value = true
   }
 
   function confirmPointLabelEdit() {
@@ -174,7 +167,7 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       const nextLabels = [...(shape.pointLabels ?? [])]
       const nextLatex = [...(shape.pointLabelLatex ?? [])]
       nextLabels[state.pointIndex] = value || getGlobalPointLabel(shape.id, state.pointIndex)
-      nextLatex[state.pointIndex] = pointLabelUseLatex.value
+      nextLatex[state.pointIndex] = true
       return {
         ...shape,
         pointLabels: nextLabels,
@@ -183,13 +176,13 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
     })
     pointLabelEditState.value = null
     pointLabelValue.value = ''
-    pointLabelUseLatex.value = false
+    pointLabelUseLatex.value = true
   }
 
   function cancelPointLabelEdit() {
     pointLabelEditState.value = null
     pointLabelValue.value = ''
-    pointLabelUseLatex.value = false
+    pointLabelUseLatex.value = true
   }
 
   function handlePointLabelDblClick(shape: Shape, pointIndex: number, e: { cancelBubble: boolean }) {
@@ -220,13 +213,12 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       for (let i = 0; i < shape.points.length; i++) {
         if (!isShapeGuideItemVisible(shape, 'pointName', i)) continue
         if (isShapeGuideItemBlank(shape, 'pointName', i)) continue
-        if (!shape.pointLabelLatex?.[i]) continue
         const textPos = getShapePointNameTextPos(shape, i)
         overlays.push({
           key: `${shape.id}-${i}`,
           x: textPos.x,
           y: textPos.y,
-          html: renderLatexHtml(getGlobalPointLabel(shape.id, i)),
+          html: renderLatexLikeHtml(getGlobalPointLabel(shape.id, i), !!shape.pointLabelLatex?.[i]),
           shapeId: shape.id,
           pointIndex: i,
           color: getShapeGuideItemStyle(shape, 'pointName', i).color || '#222',
@@ -249,13 +241,13 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       rotation: number
     }> = []
     for (const guide of canvasStore.guides) {
-      if (guide.type !== 'text' || guide.visible === false || !guide.useLatex) continue
+      if (guide.type !== 'text' || guide.visible === false) continue
       const anchor = getTextGuideAnchor(guide)
       overlays.push({
         key: guide.id,
         x: anchor.x,
         y: anchor.y,
-        html: renderLatexHtml(guide.text || ''),
+        html: renderLatexLikeHtml(guide.text || '', !!guide.useLatex),
         guideId: guide.id,
         color: guide.color || '#231815',
         fontSize: getTextGuideFontSize(guide),

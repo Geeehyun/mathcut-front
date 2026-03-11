@@ -5,14 +5,46 @@ import { GRID_CONFIG } from '@/types'
 import { OPEN_SHAPE_TYPES } from '@/constants/shapeRules'
 import { useCanvasStore } from '@/stores/canvas'
 import { useToolStore } from '@/stores/tool'
+import { renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
+import katexCssRaw from 'katex/dist/katex.min.css?raw'
 import katexMainRegularUrl from 'katex/dist/fonts/KaTeX_Main-Regular.woff2?url'
 import katexMainBoldUrl from 'katex/dist/fonts/KaTeX_Main-Bold.woff2?url'
+import katexMainItalicUrl from 'katex/dist/fonts/KaTeX_Main-Italic.woff2?url'
+import katexMainBoldItalicUrl from 'katex/dist/fonts/KaTeX_Main-BoldItalic.woff2?url'
+import katexMathItalicUrl from 'katex/dist/fonts/KaTeX_Math-Italic.woff2?url'
+import katexMathBoldItalicUrl from 'katex/dist/fonts/KaTeX_Math-BoldItalic.woff2?url'
+import katexAmsRegularUrl from 'katex/dist/fonts/KaTeX_AMS-Regular.woff2?url'
+import katexCaligraphicRegularUrl from 'katex/dist/fonts/KaTeX_Caligraphic-Regular.woff2?url'
+import katexCaligraphicBoldUrl from 'katex/dist/fonts/KaTeX_Caligraphic-Bold.woff2?url'
+import katexFrakturRegularUrl from 'katex/dist/fonts/KaTeX_Fraktur-Regular.woff2?url'
+import katexFrakturBoldUrl from 'katex/dist/fonts/KaTeX_Fraktur-Bold.woff2?url'
+import katexSansSerifRegularUrl from 'katex/dist/fonts/KaTeX_SansSerif-Regular.woff2?url'
+import katexSansSerifItalicUrl from 'katex/dist/fonts/KaTeX_SansSerif-Italic.woff2?url'
+import katexSansSerifBoldUrl from 'katex/dist/fonts/KaTeX_SansSerif-Bold.woff2?url'
+import katexScriptRegularUrl from 'katex/dist/fonts/KaTeX_Script-Regular.woff2?url'
+import katexTypewriterRegularUrl from 'katex/dist/fonts/KaTeX_Typewriter-Regular.woff2?url'
+import katexSize1RegularUrl from 'katex/dist/fonts/KaTeX_Size1-Regular.woff2?url'
+import katexSize2RegularUrl from 'katex/dist/fonts/KaTeX_Size2-Regular.woff2?url'
+import katexSize3RegularUrl from 'katex/dist/fonts/KaTeX_Size3-Regular.woff2?url'
+import katexSize4RegularUrl from 'katex/dist/fonts/KaTeX_Size4-Regular.woff2?url'
 
 type ExportFormat = 'png' | 'pdf' | 'svg'
 type ShapeGuideKey = 'length' | 'angle' | 'pointName' | 'height'
 type ShapeGuideVisibilityKey = ShapeGuideKey | 'radius' | 'point'
 
 type PointLike = { x: number, y: number }
+const MM_TO_PX = 96 / 25.4
+
+function getBlankBoxUnitMode(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' }): 'none' | 'cm' | 'angle' {
+  return guide.blankUnitMode === 'cm' || guide.blankUnitMode === 'angle' ? guide.blankUnitMode : 'none'
+}
+
+function getBlankBoxSuffixText(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' }): string {
+  const mode = getBlankBoxUnitMode(guide)
+  if (mode === 'cm') return 'cm'
+  if (mode === 'angle') return '°'
+  return ''
+}
 
 interface ExportOptions {
   fileName?: string
@@ -207,6 +239,88 @@ function svgKonvaTextEl(
   return `<text x="${drawX.toFixed(2)}" y="${drawY.toFixed(2)}" ${base}${rotation}>${svgEsc(text)}</text>`
 }
 
+function svgHtmlEsc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
+function svgForeignObjectKatexEl(
+  html: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+  fontSize: number,
+  options?: {
+    rotation?: number
+    originX?: number
+    originY?: number
+    align?: 'left' | 'center'
+    baselineShiftPx?: number
+  }
+): string {
+  const align = options?.align || 'left'
+  const baselineShiftPx = options?.baselineShiftPx ?? 0
+  const contentLiftPx = Number((fontSize * 0.18).toFixed(2))
+  const yLiftPx = Number((fontSize * 0.58).toFixed(2))
+  const wrapperStyle = [
+    'display:inline-block',
+    'position:relative',
+    `top:-${contentLiftPx}px`,
+    `color:${svgHtmlEsc(color)}`,
+    `font-size:${fontSize}px`,
+    'line-height:1',
+    'white-space:nowrap',
+    'text-rendering:geometricPrecision',
+    '-webkit-font-smoothing:antialiased',
+    align === 'center' ? 'transform:translate(-50%, 0)' : '',
+    options?.rotation !== undefined
+      ? `transform:${align === 'center' ? `translate(-50%, 0) rotate(${options.rotation}deg)` : `rotate(${options.rotation}deg)`};transform-origin:${(options?.originX ?? x) - x}px ${(options?.originY ?? y) - y}px`
+      : ''
+  ].filter(Boolean).join(';')
+  return `<foreignObject x="${x.toFixed(2)}" y="${(y + baselineShiftPx - yLiftPx).toFixed(2)}" width="${Math.max(1, width).toFixed(2)}" height="${Math.max(1, height).toFixed(2)}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="${wrapperStyle}">${html}</div></foreignObject>`
+}
+
+let katexSvgCssPromise: Promise<string> | null = null
+
+async function getKatexSvgCss(embedFonts: boolean): Promise<string> {
+  if (katexSvgCssPromise) return katexSvgCssPromise
+  katexSvgCssPromise = (async () => {
+    if (!embedFonts) return katexCssRaw
+    const fontSources = [
+      ['KaTeX_AMS-Regular.woff2', katexAmsRegularUrl],
+      ['KaTeX_Caligraphic-Bold.woff2', katexCaligraphicBoldUrl],
+      ['KaTeX_Caligraphic-Regular.woff2', katexCaligraphicRegularUrl],
+      ['KaTeX_Fraktur-Bold.woff2', katexFrakturBoldUrl],
+      ['KaTeX_Fraktur-Regular.woff2', katexFrakturRegularUrl],
+      ['KaTeX_Main-Bold.woff2', katexMainBoldUrl],
+      ['KaTeX_Main-BoldItalic.woff2', katexMainBoldItalicUrl],
+      ['KaTeX_Main-Italic.woff2', katexMainItalicUrl],
+      ['KaTeX_Main-Regular.woff2', katexMainRegularUrl],
+      ['KaTeX_Math-BoldItalic.woff2', katexMathBoldItalicUrl],
+      ['KaTeX_Math-Italic.woff2', katexMathItalicUrl],
+      ['KaTeX_SansSerif-Bold.woff2', katexSansSerifBoldUrl],
+      ['KaTeX_SansSerif-Italic.woff2', katexSansSerifItalicUrl],
+      ['KaTeX_SansSerif-Regular.woff2', katexSansSerifRegularUrl],
+      ['KaTeX_Script-Regular.woff2', katexScriptRegularUrl],
+      ['KaTeX_Size1-Regular.woff2', katexSize1RegularUrl],
+      ['KaTeX_Size2-Regular.woff2', katexSize2RegularUrl],
+      ['KaTeX_Size3-Regular.woff2', katexSize3RegularUrl],
+      ['KaTeX_Size4-Regular.woff2', katexSize4RegularUrl],
+      ['KaTeX_Typewriter-Regular.woff2', katexTypewriterRegularUrl],
+    ] as const
+    const fontEntries = await Promise.all(
+      fontSources.map(async ([fileName, url]) => [fileName, await fetchFontAsBase64(url)] as const)
+    )
+    let css = katexCssRaw
+    for (const [fileName, dataUrl] of fontEntries) {
+      css = css.replace(new RegExp(`fonts/${fileName.replace('.', '\\.')}`, 'g'), dataUrl)
+    }
+    return css
+  })()
+  return katexSvgCssPromise
+}
+
 async function generateVectorSVG(
   exportW: number,
   exportH: number,
@@ -329,20 +443,34 @@ async function generateVectorSVG(
           const fontSize = gSt.fontSize || fs
           const tc = svg.getShapeGuideTextColor(shape, 'length', pi, svg.getShapeGuideFallbackTextColor(shape, 'length', pi))
           if (text) {
-            els.push(svgKonvaTextEl(mainText, pos.x, pos.y, fontSize, tc, ff, {
-              offsetX: svg.getShapeLengthTextOffsetX(shape, pi, mainText, fontSize, toolStore.showGuideUnit),
-              offsetY: fontSize * 0.45
-            }))
-            if (toolStore.showGuideUnit) {
-              els.push(svgKonvaTextEl('cm', svg.getShapeLengthUnitX(shape, pi, pos.x, mainText, fontSize, true), svg.getUnitYFromCenteredText(pos.y, fontSize), fontSize, tc, ff))
-            }
+            const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
+            const width = svg.getTextWidthPx(displayText, fontSize) + 8
+            els.push(svgForeignObjectKatexEl(
+              renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
+              pos.x,
+              pos.y - fontSize * 0.45,
+              width,
+              fontSize * 2,
+              tc,
+              fontSize,
+              { align: 'center' }
+            ))
           }
         } else {
           els.push(svgBlankRectEl(svg, shape, 'length', pi))
           if (toolStore.showGuideUnit) {
             const upos = svg.getShapeGuideBlankTextPos(shape, 'length', pi, 'unit')
             const tc = svg.getShapeGuideTextColor(shape, 'length', pi, svg.getShapeGuideFallbackTextColor(shape, 'length', pi))
-            els.push(svgKonvaTextEl('cm', upos.x, upos.y, gSt.fontSize || fs, tc, ff))
+            const fontSize = gSt.fontSize || fs
+            els.push(svgForeignObjectKatexEl(
+              renderLatexLikeHtml(toBlankUnitLatex(), true),
+              upos.x,
+              upos.y,
+              fontSize * 3,
+              fontSize * 2,
+              tc,
+              fontSize
+            ))
           }
         }
       }
@@ -367,20 +495,34 @@ async function generateVectorSVG(
         const fontSize = gSt.fontSize || fs
         const tc = svg.getShapeGuideTextColor(shape, 'length', 0, svg.getShapeGuideFallbackTextColor(shape, 'length', 0))
         if (text) {
-          els.push(svgKonvaTextEl(mainText, pos.x, pos.y, fontSize, tc, ff, {
-            offsetX: svg.getShapeLengthTextOffsetX(shape, 0, mainText, fontSize, toolStore.showGuideUnit),
-            offsetY: fontSize * 0.45
-          }))
-          if (toolStore.showGuideUnit) {
-            els.push(svgKonvaTextEl('cm', svg.getShapeLengthUnitX(shape, 0, pos.x, mainText, fontSize, true), svg.getUnitYFromCenteredText(pos.y, fontSize), fontSize, tc, ff))
-          }
+          const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
+          const width = svg.getTextWidthPx(displayText, fontSize) + 8
+          els.push(svgForeignObjectKatexEl(
+            renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
+            pos.x,
+            pos.y - fontSize * 0.45,
+            width,
+            fontSize * 2,
+            tc,
+            fontSize,
+            { align: 'center' }
+          ))
         }
       } else {
         els.push(svgBlankRectEl(svg, shape, 'length', 0))
         if (toolStore.showGuideUnit) {
           const upos = svg.getShapeGuideBlankTextPos(shape, 'length', 0, 'unit')
           const tc = svg.getShapeGuideTextColor(shape, 'length', 0, svg.getShapeGuideFallbackTextColor(shape, 'length', 0))
-          els.push(svgKonvaTextEl('cm', upos.x, upos.y, gSt.fontSize || fs, tc, ff))
+          const fontSize = gSt.fontSize || fs
+          els.push(svgForeignObjectKatexEl(
+            renderLatexLikeHtml(toBlankUnitLatex(), true),
+            upos.x,
+            upos.y,
+            fontSize * 3,
+            fontSize * 2,
+            tc,
+            fontSize
+          ))
         }
       }
     }
@@ -413,20 +555,34 @@ async function generateVectorSVG(
           const fontSize = hSt.fontSize || fs
           const tc = svg.getShapeGuideTextColor(shape, 'height', 0, svg.getShapeGuideFallbackTextColor(shape, 'height', 0))
           if (text) {
-            els.push(svgKonvaTextEl(mainText, pos.x, pos.y, fontSize, tc, ff, {
-              offsetX: svg.getShapeLengthTextOffsetX(shape, 0, mainText, fontSize, toolStore.showGuideUnit),
-              offsetY: fontSize * 0.45
-            }))
-            if (toolStore.showGuideUnit) {
-              els.push(svgKonvaTextEl('cm', svg.getShapeLengthUnitX(shape, 0, pos.x, mainText, fontSize, true), svg.getUnitYFromCenteredText(pos.y, fontSize), fontSize, tc, ff))
-            }
+            const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
+            const width = svg.getTextWidthPx(displayText, fontSize) + 8
+            els.push(svgForeignObjectKatexEl(
+              renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
+              pos.x,
+              pos.y - fontSize * 0.45,
+              width,
+              fontSize * 2,
+              tc,
+              fontSize,
+              { align: 'center' }
+            ))
           }
         } else {
           els.push(svgBlankRectEl(svg, shape, 'height', 0))
           if (toolStore.showGuideUnit) {
             const upos = svg.getShapeGuideBlankTextPos(shape, 'height', 0, 'unit')
             const tc = svg.getShapeGuideTextColor(shape, 'height', 0, svg.getShapeGuideFallbackTextColor(shape, 'height', 0))
-            els.push(svgKonvaTextEl('cm', upos.x, upos.y, hSt.fontSize || fs, tc, ff))
+            const fontSize = hSt.fontSize || fs
+            els.push(svgForeignObjectKatexEl(
+              renderLatexLikeHtml(toBlankUnitLatex(), true),
+              upos.x,
+              upos.y,
+              fontSize * 3,
+              fontSize * 2,
+              tc,
+              fontSize
+            ))
           }
         }
       }
@@ -455,16 +611,32 @@ async function generateVectorSVG(
           const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
           const fontSize = aSt.fontSize || fs
           if (text) {
-            els.push(svgKonvaTextEl(text, pos.x, pos.y, fontSize, tc, ff, {
-              offsetX: svg.getShapeAngleTextOffsetX(shape, ai, text, fontSize),
-              offsetY: svg.getShapeAngleTextOffsetY(shape, ai, fontSize)
-            }))
+            const width = svg.getTextWidthPx(text.replace(/°$/, '') + '°', fontSize) + 8
+            els.push(svgForeignObjectKatexEl(
+              renderLatexLikeHtml(toAngleLatex(text), true),
+              pos.x,
+              pos.y - svg.getShapeAngleTextOffsetY(shape, ai, fontSize),
+              width,
+              fontSize * 2,
+              tc,
+              fontSize,
+              { align: 'center' }
+            ))
           }
         } else {
           els.push(svgBlankRectEl(svg, shape, 'angle', ai))
           const spos = svg.getShapeGuideBlankTextPos(shape, 'angle', ai, 'suffix')
           const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
-          els.push(svgKonvaTextEl(String.fromCharCode(176), spos.x - 3, spos.y - 3, aSt.fontSize || fs, tc, ff))
+          const fontSize = aSt.fontSize || fs
+          els.push(svgForeignObjectKatexEl(
+            renderLatexLikeHtml(toBlankAngleLatex(), true),
+            spos.x - 3,
+            spos.y - 3,
+            fontSize * 2,
+            fontSize * 2,
+            tc,
+            fontSize
+          ))
         }
       }
     }
@@ -476,12 +648,21 @@ async function generateVectorSVG(
           els.push(svgBlankRectEl(svg, shape, 'pointName', pi))
           continue
         }
-        if (shape.pointLabelLatex?.[pi]) continue
         const pos = svg.getShapePointNameTextPos(shape, pi)
         const label = svg.getGlobalPointLabel(shape.id, pi)
         const tc = svg.getShapeGuideTextColor(shape, 'pointName', pi, svg.getShapeGuideFallbackTextColor(shape, 'pointName', pi))
         const pSt = svg.getShapeGuideItemStyle(shape, 'pointName', pi)
-        els.push(svgKonvaTextEl(svg.formatMathText(label), pos.x, pos.y, pSt.fontSize || fs, tc, ff))
+        const fontSize = pSt.fontSize || fs
+        const width = svg.getTextWidthPx(label, fontSize) + 24
+        els.push(svgForeignObjectKatexEl(
+          renderLatexLikeHtml(label, !!shape.pointLabelLatex?.[pi]),
+          pos.x,
+          pos.y,
+          width,
+          fontSize * 2,
+          tc,
+          fontSize
+        ))
       }
     }
   }
@@ -493,13 +674,54 @@ async function generateVectorSVG(
       const gc = guide.color || svg.defaultTextColor
       const anchor = svg.getTextGuideAnchor(guide)
       const rotation = svg.getTextGuideRotation(guide)
-      els.push(svgKonvaTextEl(svg.formatMathText(guide.text), anchor.x, anchor.y, gfs, gc, ff, {
-        offsetX: svg.getTextWidthPx(svg.formatMathText(guide.text), gfs) * 0.5,
-        offsetY: gfs * 0.45,
-        rotation,
-        rotationOriginX: anchor.x,
-        rotationOriginY: anchor.y
-      }))
+      const width = svg.getTextWidthPx(guide.text, gfs) + 32
+      els.push(svgForeignObjectKatexEl(
+        renderLatexLikeHtml(guide.text, !!guide.useLatex),
+        anchor.x,
+        anchor.y - gfs * 0.45,
+        width,
+        gfs * 2.2,
+        gc,
+        gfs,
+        {
+          align: 'center',
+          rotation,
+          originX: anchor.x,
+          originY: anchor.y
+        }
+      ))
+    } else if (guide.type === 'blank-box' && guide.points.length >= 2) {
+      const centerX = (guide.points[0].x + guide.points[1].x) / 2
+      const centerY = (guide.points[0].y + guide.points[1].y) / 2
+      const widthMm = Number(guide.blankWidthMm)
+      const width = Math.max(8, (Number.isFinite(widthMm) ? widthMm : 7) * MM_TO_PX)
+      const height = 7 * MM_TO_PX
+      const x = centerX - width / 2
+      const y = centerY - height / 2
+      const cornerRadius = Math.min(height * 0.22, 8)
+      els.push(`<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${width.toFixed(2)}" height="${height.toFixed(2)}" rx="${cornerRadius.toFixed(2)}" fill="#FFFFFF" stroke="${svg.blankBorderColor}" stroke-width="${svg.blankBorderWidthPx.toFixed(2)}"/>`)
+      const suffixText = getBlankBoxSuffixText(guide)
+      if (suffixText) {
+        const unitMode = getBlankBoxUnitMode(guide)
+        const gap = unitMode === 'cm' ? GRID_CONFIG.size / 2 : 4
+        const fontSize = guide.fontSize || fs
+        const suffixX = x + width + gap
+        const suffixY = y + (height / 2) - (fontSize * 0.45)
+        const suffixLatex = toBlankBoxSuffixLatex(unitMode)
+        if (suffixLatex) {
+          els.push(svgForeignObjectKatexEl(
+            renderLatexLikeHtml(suffixLatex, true),
+            suffixX,
+            suffixY,
+            Math.max(fontSize * 3, 24),
+            fontSize * 2,
+            svg.defaultTextColor,
+            fontSize
+          ))
+        } else {
+          els.push(svgKonvaTextEl(suffixText, suffixX, suffixY, fontSize, svg.defaultTextColor, ff))
+        }
+      }
     } else if (guide.type === 'length' && guide.points.length >= 2 && toolStore.showLength) {
       const gc = guide.color || svg.lengthGuideDefaultColor
       const gLW = guide.lineWidth ? guide.lineWidth * svg.ptToPx : svg.defaultGuideLinePx
@@ -534,19 +756,11 @@ async function generateVectorSVG(
   }
 
   const defsItems: string[] = []
-  if (embedFonts) {
-    try {
-      const [regularB64, boldB64] = await Promise.all([
-        fetchFontAsBase64(katexMainRegularUrl),
-        fetchFontAsBase64(katexMainBoldUrl),
-      ])
-      defsItems.push(
-        `<style>@font-face{font-family:'KaTeX_Main';font-weight:400;src:url('${regularB64}') format('woff2');}` +
-        `@font-face{font-family:'KaTeX_Main';font-weight:700;src:url('${boldB64}') format('woff2');}</style>`
-      )
-    } catch (e) {
-      console.warn('[SVG] font embedding failed, using fallback:', e)
-    }
+  const styleItems: string[] = []
+  try {
+    styleItems.push(`<style>${svgEsc(await getKatexSvgCss(embedFonts))}</style>`)
+  } catch (e) {
+    console.warn('[SVG] katex css embedding failed, using fallback:', e)
   }
   if (grayscale) {
     defsItems.push(`<filter id="gs"><feColorMatrix type="saturate" values="0"/></filter>`)
@@ -555,7 +769,7 @@ async function generateVectorSVG(
   const body = grayscale
     ? `<g filter="url(#gs)">\n${els.join('\n')}\n</g>`
     : els.join('\n')
-  const inner = [defsStr, body].filter(Boolean).join('\n')
+  const inner = [defsStr, ...styleItems, body].filter(Boolean).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${exportW}" height="${exportH}" viewBox="0 0 ${sw} ${sh}">\n${inner}\n</svg>`
 }
 

@@ -26,7 +26,7 @@ interface UseCanvasTransformPreviewOptions {
   computeIsoscelesApex: (a: Point, b: Point, c: Point) => Point
   computeSquare: (a: Point, b: Point) => [Point, Point]
   computeRectangle: (a: Point, b: Point) => Point[]
-  computeRhombus: (a: Point, b: Point) => Point[]
+  computeRhombus: (a: Point, b: Point, c: Point) => Point[]
   computeParallelogram: (a: Point, b: Point, c: Point) => Point
   computeTrapezoidFromThreePoints: (a: Point, b: Point, c: Point) => Point[]
   computeRegularPolygon: (a: Point, b: Point, sides: number) => Point[]
@@ -130,8 +130,8 @@ export function useCanvasTransformPreview(options: UseCanvasTransformPreviewOpti
     if (shapeType === 'rect-rectangle' && points.length >= 2) {
       return computeRectangle(points[0], points[1])
     }
-    if (shapeType === 'rect-rhombus' && points.length >= 2) {
-      return computeRhombus(points[0], points[1])
+    if (shapeType === 'rect-rhombus' && points.length >= 3) {
+      return computeRhombus(points[0], points[1], points[2])
     }
     if (shapeType === 'rect-parallelogram' && points.length >= 3) {
       return [points[0], points[1], computeParallelogram(points[0], points[1], points[2]), points[2]]

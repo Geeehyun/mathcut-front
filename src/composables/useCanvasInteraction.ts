@@ -99,9 +99,14 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     startOffset: { x: number, y: number }
   } | null>(null)
   const hoveredTextGuideId = ref<string | null>(null)
+  const hoveredBlankBoxGuideId = ref<string | null>(null)
   const textGuideDrag = ref<{
     guideId: string
-    lastPoint: Point
+    lastPoint: DragCenter
+  } | null>(null)
+  const blankBoxGuideDrag = ref<{
+    guideId: string
+    lastPoint: DragCenter
   } | null>(null)
   const textGuideTransformDrag = ref<{
     guideId: string
@@ -116,6 +121,31 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
   const hoveredVertexKey = ref<string | null>(null)
   const hoveredGuideTextKey = ref<string | null>(null)
 
+  function isSubGridShapeType(shapeType: string): boolean {
+    return shapeType === 'arrow' || shapeType === 'arrow-curve'
+  }
+
+  function isSubGridGuideType(guideType: string): boolean {
+    return guideType === 'text' || guideType === 'blank-box'
+  }
+
+  function snapForCurrentTool(x: number, y: number): Point {
+    if (toolStore.mode === 'shape' && isSubGridShapeType(toolStore.shapeType)) {
+      return snapToSubGrid(x, y)
+    }
+    if (toolStore.mode === 'guide' && isSubGridGuideType(toolStore.guideType)) {
+      return snapToSubGrid(x, y)
+    }
+    return snapToGrid(x, y)
+  }
+
+  function snapForSelectedShape(shape: Shape, x: number, y: number): Point {
+    if (shape.type === 'point-on-object' || isSubGridShapeType(shape.type)) {
+      return snapToSubGrid(x, y)
+    }
+    return snapToGrid(x, y)
+  }
+
   function clearInteractionState() {
     panDrag.value = null
     shapeDrag.value = null
@@ -123,8 +153,10 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     transformDrag.value = null
     guideTextDrag.value = null
     textGuideDrag.value = null
+    blankBoxGuideDrag.value = null
     textGuideTransformDrag.value = null
     hoveredTextGuideId.value = null
+    hoveredBlankBoxGuideId.value = null
     hoveredGuideTextKey.value = null
   }
 
@@ -206,7 +238,7 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
       return
     }
 
-    mousePos.value = snapToGrid(pos.x, pos.y)
+    mousePos.value = snapForCurrentTool(pos.x, pos.y)
     emitMouseMove({
       x: Math.round(pos.x / GRID_CONFIG.size),
       y: Math.round(pos.y / GRID_CONFIG.size)
@@ -248,9 +280,8 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     }
 
     if (toolStore.mode === 'select' && textGuideDrag.value) {
-      const snapped = snapToGrid(pos.x, pos.y)
-      const dx = snapped.x - textGuideDrag.value.lastPoint.x
-      const dy = snapped.y - textGuideDrag.value.lastPoint.y
+      const dx = pos.x - textGuideDrag.value.lastPoint.x
+      const dy = pos.y - textGuideDrag.value.lastPoint.y
       if (dx !== 0 || dy !== 0) {
         canvasStore.updateGuide(textGuideDrag.value.guideId, (guide) => ({
           ...guide,
@@ -264,7 +295,25 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
             : p
           )
         }), false)
-        textGuideDrag.value.lastPoint = snapped
+        textGuideDrag.value.lastPoint = { x: pos.x, y: pos.y }
+      }
+      return
+    }
+
+    if (toolStore.mode === 'select' && blankBoxGuideDrag.value) {
+      const dx = pos.x - blankBoxGuideDrag.value.lastPoint.x
+      const dy = pos.y - blankBoxGuideDrag.value.lastPoint.y
+      if (dx !== 0 || dy !== 0) {
+        canvasStore.updateGuide(blankBoxGuideDrag.value.guideId, (guide) => ({
+          ...guide,
+          points: guide.points.map((p) => ({
+            x: p.x + dx,
+            y: p.y + dy,
+            gridX: (p.x + dx) / GRID_CONFIG.size,
+            gridY: (p.y + dy) / GRID_CONFIG.size
+          }))
+        }), false)
+        blankBoxGuideDrag.value.lastPoint = { x: pos.x, y: pos.y }
       }
       return
     }
@@ -313,15 +362,18 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
         vertexDrag.value = null
         return
       }
-      const snapped = shape.type === 'point-on-object'
-        ? snapToSubGrid(pos.x, pos.y)
-        : snapToGrid(pos.x, pos.y)
+      const snapped = snapForSelectedShape(shape, pos.x, pos.y)
       canvasStore.setShapePoint(vertexDrag.value.shapeId, vertexDrag.value.pointIndex, snapped, false)
       return
     }
 
     if (toolStore.mode === 'select' && shapeDrag.value) {
-      const snapped = snapToGrid(pos.x, pos.y)
+      const shape = shapeMap.value.get(shapeDrag.value.id)
+      if (!shape) {
+        shapeDrag.value = null
+        return
+      }
+      const snapped = snapForSelectedShape(shape, pos.x, pos.y)
       const dx = snapped.x - shapeDrag.value.lastPoint.x
       const dy = snapped.y - shapeDrag.value.lastPoint.y
       if (dx !== 0 || dy !== 0) {
@@ -360,6 +412,10 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     }
     if (toolStore.mode === 'select' && textGuideDrag.value) {
       textGuideDrag.value = null
+      return
+    }
+    if (toolStore.mode === 'select' && blankBoxGuideDrag.value) {
+      blankBoxGuideDrag.value = null
       return
     }
     if (toolStore.mode === 'select' && transformDrag.value) {
@@ -401,7 +457,9 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     if (!stage) return
     const pos = getLogicalPointerPos(stage)
     if (!pos) return
-    const snapped = snapToGrid(pos.x, pos.y)
+    const shape = shapeMap.value.get(id)
+    if (!shape) return
+    const snapped = snapForSelectedShape(shape, pos.x, pos.y)
     canvasStore.saveHistory()
     selectedTextGuideId.value = null
     canvasStore.selectShape(id)
@@ -424,6 +482,17 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     }
   }
 
+  function handleBlankBoxGuideMouseEnter(guideId: string) {
+    if (toolStore.mode !== 'select') return
+    hoveredBlankBoxGuideId.value = guideId
+  }
+
+  function handleBlankBoxGuideMouseLeave(guideId: string) {
+    if (hoveredBlankBoxGuideId.value === guideId) {
+      hoveredBlankBoxGuideId.value = null
+    }
+  }
+
   function handleTextGuideClick(guideId: string, e: KonvaEventObject<MouseEvent>) {
     if (interactionLocked.value) return
     if (toolStore.mode !== 'select') return
@@ -442,13 +511,41 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     if (!stage) return
     const pos = getLogicalPointerPos(stage)
     if (!pos) return
-    const snapped = snapToGrid(pos.x, pos.y)
     canvasStore.saveHistory()
     canvasStore.selectGuide(guideId)
     selectedTextGuideId.value = guideId
     textGuideDrag.value = {
       guideId,
-      lastPoint: snapped
+      lastPoint: { x: pos.x, y: pos.y }
+    }
+    suppressCanvasClick.value = true
+    e.cancelBubble = true
+  }
+
+  function handleBlankBoxGuideClick(guideId: string, e: KonvaEventObject<MouseEvent>) {
+    if (interactionLocked.value) return
+    if (toolStore.mode !== 'select') return
+    canvasStore.selectGuide(guideId)
+    selectedTextGuideId.value = null
+    suppressCanvasClick.value = true
+    e.cancelBubble = true
+  }
+
+  function handleBlankBoxGuideMouseDown(guideId: string, e: KonvaEventObject<MouseEvent>) {
+    if (interactionLocked.value) return
+    if (shouldStartPanGesture(e.evt)) return
+    if (e.evt.button !== 0) return
+    if (toolStore.mode !== 'select') return
+    const stage = e.target.getStage()
+    if (!stage) return
+    const pos = getLogicalPointerPos(stage)
+    if (!pos) return
+    canvasStore.saveHistory()
+    canvasStore.selectGuide(guideId)
+    selectedTextGuideId.value = null
+    blankBoxGuideDrag.value = {
+      guideId,
+      lastPoint: { x: pos.x, y: pos.y }
     }
     suppressCanvasClick.value = true
     e.cancelBubble = true
@@ -469,13 +566,12 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     stage.setPointersPositions(e as any)
     const pos = getLogicalPointerPos(stage)
     if (!pos) return
-    const snapped = snapToGrid(pos.x, pos.y)
     canvasStore.saveHistory()
     canvasStore.selectGuide(guideId)
     selectedTextGuideId.value = guideId
     textGuideDrag.value = {
       guideId,
-      lastPoint: snapped
+      lastPoint: { x: pos.x, y: pos.y }
     }
   }
 
@@ -647,6 +743,51 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     }
   }
 
+  function handleLatexShapeGuideMouseDown(
+    shapeId: string,
+    guideKey: 'length' | 'angle' | 'height',
+    itemIndex: number,
+    e: MouseEvent
+  ) {
+    if (interactionLocked.value) return
+    if (shouldStartPanGesture(e)) return
+    if (toolStore.mode !== 'select') return
+    if (e.button !== 0) return
+    const stage = stageRef.value?.getNode?.()
+    if (!stage) return
+    stage.setPointersPositions(e as any)
+    const pos = getLogicalPointerPos(stage)
+    if (!pos) return
+    const shape = shapeMap.value.get(shapeId)
+    if (!shape) return
+    const offset = getShapeGuideItemOffset(shape, guideKey, itemIndex)
+    canvasStore.saveHistory()
+    canvasStore.selectShape(shapeId)
+    shapeDrag.value = null
+    vertexDrag.value = null
+    transformDrag.value = null
+    guideTextDrag.value = {
+      shapeId,
+      guideKey,
+      itemIndex,
+      startRaw: { x: pos.x, y: pos.y },
+      startOffset: { x: offset.x, y: offset.y }
+    }
+  }
+
+  function handleLatexOverlayMouseUp() {
+    if (toolStore.mode !== 'select') return
+    if (guideTextDrag.value) {
+      if (guideTextDrag.value.guideKey === 'angle') {
+        logAngleGuidePlacement(guideTextDrag.value.shapeId, guideTextDrag.value.itemIndex)
+      }
+      guideTextDrag.value = null
+    }
+    if (textGuideDrag.value) {
+      textGuideDrag.value = null
+    }
+  }
+
   function handleRotateHandleMouseDown(shapeId: string, e: KonvaEventObject<MouseEvent>) {
     if (interactionLocked.value) return
     if (shouldStartPanGesture(e.evt)) return
@@ -727,7 +868,9 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     transformDrag,
     guideTextDrag,
     hoveredTextGuideId,
+    hoveredBlankBoxGuideId,
     textGuideDrag,
+    blankBoxGuideDrag,
     textGuideTransformDrag,
     hoveredVertex,
     hoveredVertexKey,
@@ -744,8 +887,12 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     handleShapeNodeMouseDown,
     handleTextGuideMouseEnter,
     handleTextGuideMouseLeave,
+    handleBlankBoxGuideMouseEnter,
+    handleBlankBoxGuideMouseLeave,
     handleTextGuideClick,
     handleTextGuideMouseDown,
+    handleBlankBoxGuideClick,
+    handleBlankBoxGuideMouseDown,
     handleTextGuideDblClick,
     handleTextGuideOverlayMouseDown,
     handleVertexHandleMouseDown,
@@ -760,6 +907,8 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     handleTextGuideScaleHandleMouseDown,
     handleShapeGuideTextMouseDown,
     handleLatexPointLabelMouseDown,
+    handleLatexShapeGuideMouseDown,
+    handleLatexOverlayMouseUp,
     handleRotateHandleMouseDown,
     handleTextGuideRotateHandleMouseDown,
     handleShapeNodeMouseEnter,

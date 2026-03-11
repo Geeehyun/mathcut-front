@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import katex from 'katex'
+import { renderLatexLikeHtml } from '@/utils/latexText'
 
 interface PositionedState {
   rawX: number
@@ -19,6 +19,10 @@ const props = defineProps<{
   textGuideEditState: PositionedState | null
   textGuideValue: string
   textGuideUseLatex: boolean
+  shapeGuideValueEditState: PositionedState | null
+  shapeGuideValue: string
+  shapeGuideValueLabel: string
+  shapeGuideApplyToGeometry: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,12 +32,17 @@ const emit = defineEmits<{
   'update:pointLabelUseLatex': [value: boolean]
   'update:textGuideValue': [value: string]
   'update:textGuideUseLatex': [value: boolean]
+  'update:shapeGuideValue': [value: string]
+  'update:shapeGuideApplyToGeometry': [value: boolean]
   confirmTextInput: []
   cancelTextInput: []
   confirmPointLabelEdit: []
   cancelPointLabelEdit: []
   confirmTextGuideEdit: []
   cancelTextGuideEdit: []
+  confirmShapeGuideValueEdit: []
+  cancelShapeGuideValueEdit: []
+  resetShapeGuideValueEdit: []
 }>()
 
 const textInputRef = ref<HTMLInputElement | null>(null)
@@ -42,6 +51,8 @@ const pointLabelInputRef = ref<HTMLInputElement | null>(null)
 const pointLabelPanelRef = ref<HTMLElement | null>(null)
 const textGuideInputRef = ref<HTMLInputElement | null>(null)
 const textGuidePanelRef = ref<HTMLElement | null>(null)
+const shapeGuideValueInputRef = ref<HTMLInputElement | null>(null)
+const shapeGuideValuePanelRef = ref<HTMLElement | null>(null)
 
 watch(() => props.textInputState, async (state) => {
   if (!state) return
@@ -63,21 +74,21 @@ watch(() => props.textGuideEditState, async (state) => {
   textGuideInputRef.value?.select()
 }, { deep: true })
 
-function renderLatexHtml(input: string): string {
-  return katex.renderToString(input || '', {
-    throwOnError: false,
-    displayMode: false
-  })
-}
+watch(() => props.shapeGuideValueEditState, async (state) => {
+  if (!state) return
+  await nextTick()
+  shapeGuideValueInputRef.value?.focus()
+  shapeGuideValueInputRef.value?.select()
+}, { deep: true })
 
 const textInputPreviewHtml = computed(() =>
-  props.textInputUseLatex && props.textInputValue.trim() ? renderLatexHtml(props.textInputValue) : ''
+  props.textInputValue.trim() ? renderLatexLikeHtml(props.textInputValue, true) : ''
 )
 const pointLabelPreviewHtml = computed(() =>
-  props.pointLabelUseLatex && props.pointLabelValue.trim() ? renderLatexHtml(props.pointLabelValue) : ''
+  props.pointLabelValue.trim() ? renderLatexLikeHtml(props.pointLabelValue, true) : ''
 )
 const textGuidePreviewHtml = computed(() =>
-  props.textGuideUseLatex && props.textGuideValue.trim() ? renderLatexHtml(props.textGuideValue) : ''
+  props.textGuideValue.trim() ? renderLatexLikeHtml(props.textGuideValue, true) : ''
 )
 
 function handleTextInputBlur(e: FocusEvent) {
@@ -96,6 +107,12 @@ function handleTextGuideInputBlur(e: FocusEvent) {
   const next = e.relatedTarget as Node | null
   if (next && textGuidePanelRef.value?.contains(next)) return
   emit('confirmTextGuideEdit')
+}
+
+function handleShapeGuideValueInputBlur(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && shapeGuideValuePanelRef.value?.contains(next)) return
+  emit('confirmShapeGuideValueEdit')
 }
 </script>
 
@@ -120,18 +137,10 @@ function handleTextGuideInputBlur(e: FocusEvent) {
       @keydown.esc.prevent="emit('cancelTextInput')"
       @blur="handleTextInputBlur"
     />
-    <label class="mt-2 flex items-center gap-1.5 text-xs text-gray-700">
-      <input
-        :checked="props.textInputUseLatex"
-        type="checkbox"
-        tabindex="0"
-        @change="emit('update:textInputUseLatex', ($event.target as HTMLInputElement).checked)"
-      >
-      <span>LaTeX 사용</span>
-    </label>
-    <div v-if="textInputPreviewHtml" class="mt-1 text-[11px] text-gray-600">
+    <p class="mt-2 text-xs text-gray-600">LaTeX 문법 사용 가능. 일반 텍스트도 그대로 입력할 수 있습니다.</p>
+    <div class="mt-1 text-[11px] text-gray-600">
       <span>미리보기:</span>
-      <div class="mt-1 p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="textInputPreviewHtml"></div>
+      <div class="mt-1 min-h-[36px] p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="textInputPreviewHtml"></div>
     </div>
   </div>
 
@@ -155,18 +164,10 @@ function handleTextGuideInputBlur(e: FocusEvent) {
       @keydown.esc.prevent="emit('cancelPointLabelEdit')"
       @blur="handlePointLabelInputBlur"
     />
-    <label class="mt-2 flex items-center gap-1.5 text-xs text-gray-700">
-      <input
-        :checked="props.pointLabelUseLatex"
-        type="checkbox"
-        tabindex="0"
-        @change="emit('update:pointLabelUseLatex', ($event.target as HTMLInputElement).checked)"
-      >
-      <span>LaTeX 사용</span>
-    </label>
-    <div v-if="pointLabelPreviewHtml" class="mt-1 text-[11px] text-gray-600">
+    <p class="mt-2 text-xs text-gray-600">LaTeX 문법 사용 가능. 일반 텍스트도 그대로 입력할 수 있습니다.</p>
+    <div class="mt-1 text-[11px] text-gray-600">
       <span>미리보기:</span>
-      <div class="mt-1 p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="pointLabelPreviewHtml"></div>
+      <div class="mt-1 min-h-[36px] p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="pointLabelPreviewHtml"></div>
     </div>
   </div>
 
@@ -190,18 +191,53 @@ function handleTextGuideInputBlur(e: FocusEvent) {
       @keydown.esc.prevent="emit('cancelTextGuideEdit')"
       @blur="handleTextGuideInputBlur"
     />
+    <p class="mt-2 text-xs text-gray-600">LaTeX 문법 사용 가능. 일반 텍스트도 그대로 입력할 수 있습니다.</p>
+    <div class="mt-1 text-[11px] text-gray-600">
+      <span>미리보기:</span>
+      <div class="mt-1 min-h-[36px] p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="textGuidePreviewHtml"></div>
+    </div>
+  </div>
+
+  <div
+    v-if="props.shapeGuideValueEditState"
+    ref="shapeGuideValuePanelRef"
+    class="absolute z-20 bg-white/95 border border-emerald-300 rounded-lg px-2 py-2 shadow max-w-[240px] min-w-[180px]"
+    :style="{
+      left: `${props.shapeGuideValueEditState.rawX * props.zoomScale + props.viewportOffset.x}px`,
+      top: `${props.shapeGuideValueEditState.rawY * props.zoomScale + props.viewportOffset.y}px`
+    }"
+  >
+    <div class="flex items-center gap-2">
+      <input
+        ref="shapeGuideValueInputRef"
+        :value="props.shapeGuideValue"
+        type="text"
+        inputmode="decimal"
+        class="min-w-0 flex-1 border border-emerald-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+        :placeholder="`${props.shapeGuideValueLabel} 값`"
+        @input="emit('update:shapeGuideValue', ($event.target as HTMLInputElement).value)"
+        @keydown.enter.prevent="emit('confirmShapeGuideValueEdit')"
+        @keydown.esc.prevent="emit('cancelShapeGuideValueEdit')"
+        @blur="handleShapeGuideValueInputBlur"
+      />
+      <button
+        type="button"
+        class="shrink-0 rounded border border-emerald-200 px-2 py-1 text-xs text-emerald-700 transition hover:bg-emerald-50"
+        @mousedown.prevent
+        @click="emit('resetShapeGuideValueEdit')"
+      >
+        초기화
+      </button>
+    </div>
+    <p class="mt-2 text-xs text-gray-600">숫자만 입력하면 도형이 함께 조정됩니다.</p>
     <label class="mt-2 flex items-center gap-1.5 text-xs text-gray-700">
       <input
-        :checked="props.textGuideUseLatex"
+        :checked="props.shapeGuideApplyToGeometry"
         type="checkbox"
         tabindex="0"
-        @change="emit('update:textGuideUseLatex', ($event.target as HTMLInputElement).checked)"
+        @change="emit('update:shapeGuideApplyToGeometry', ($event.target as HTMLInputElement).checked)"
       >
-      <span>LaTeX 사용</span>
+      <span>수정된 수치로 도형 사이즈 함께 조정</span>
     </label>
-    <div v-if="textGuidePreviewHtml" class="mt-1 text-[11px] text-gray-600">
-      <span>미리보기:</span>
-      <div class="mt-1 p-1.5 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-normal break-all" v-html="textGuidePreviewHtml"></div>
-    </div>
   </div>
 </template>

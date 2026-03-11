@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue'
+import Konva from 'konva'
 import { useToolStore } from '@/stores/tool'
 import { useCanvasStore } from '@/stores/canvas'
 import { useShape } from '@/composables/useShape'
@@ -14,6 +15,7 @@ import {
   createQuadraticCurvePoints,
   computeAngleDegrees,
   distancePointToPolyline,
+  formatRoundedValue,
   formatAngleDegrees,
   isRightAngleByThreePoints,
   getRightAngleGuideMarkerPoints,
@@ -31,6 +33,7 @@ import { GRID_CONFIG, STYLE_COLORS } from '@/types'
 import type { Point, Shape, ShapeGuideItemStyle } from '@/types'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { formatMathText } from '@/utils/mathText'
+import { renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
 import { useCanvasExport } from '@/composables/useCanvasExport'
 import { useCanvasInteraction } from '@/composables/useCanvasInteraction'
 import { useCanvasTextEditing } from '@/composables/useCanvasTextEditing'
@@ -57,6 +60,7 @@ import {
   getShapeAngleTriplet,
   getShapeAutoAngleIndices,
   getShapeAutoLengthIndices,
+  getShapeHeightBaseEdgeIndex as getSharedShapeHeightBaseIndex,
   getShapeHeightGuide as getSharedShapeHeightGuide,
   getShapeAngleLabelPos as getSharedShapeAngleLabelPos,
   getCircleLengthLabelPos as getSharedCircleLengthLabelPos,
@@ -75,7 +79,7 @@ const ANGLE_GUIDE_DEFAULT_COLOR = '#E6007E'
 const HEIGHT_GUIDE_DEFAULT_COLOR = '#231815'
 const DEFAULT_TEXT_COLOR = '#231815'
 const DEFAULT_TEXT_FONT_SIZE = 11
-const DEFAULT_TEXT_FONT_FAMILY = 'KaTeX_Main, Times New Roman, serif'
+const DEFAULT_TEXT_FONT_FAMILY = 'KaTeX_Main, Batang, Nanum Myeongjo, Noto Serif KR, Times New Roman, serif'
 const PT_TO_PX = 96 / 72
 const DEFAULT_FILLED_STROKE_PT = 0.4
 const DEFAULT_UNFILLED_STROKE_PT = 0.6
@@ -145,6 +149,34 @@ const containerRef = ref<HTMLDivElement | null>(null)
 const containerSize = ref({ width: canvasWidth, height: canvasHeight })
 let resizeObserver: ResizeObserver | null = null
 
+function getTargetPixelRatio() {
+  // Math.ceil로 소수 DPR(Windows 125%/150% 배율)을 정수로 올림 → pixel 경계 정렬
+  return Math.min(Math.ceil(window.devicePixelRatio || 1), 2)
+}
+
+function snapTextValue(value: number) {
+  const step = 1 / getTargetPixelRatio()
+  return Math.round(value / step) * step
+}
+
+function snapTextPoint(point: { x: number, y: number }) {
+  return {
+    x: snapTextValue(point.x),
+    y: snapTextValue(point.y)
+  }
+}
+
+function applyStagePixelRatio() {
+  const stage = stageRef.value?.getNode?.()
+  if (!stage) return
+  const pixelRatio = getTargetPixelRatio()
+  Konva.pixelRatio = pixelRatio
+  for (const layer of stage.getLayers()) {
+    layer.getCanvas().setPixelRatio(pixelRatio)
+    layer.batchDraw()
+  }
+}
+
 onMounted(() => {
   if (containerRef.value) {
     const update = () => {
@@ -159,12 +191,15 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(update)
     resizeObserver.observe(containerRef.value)
   }
+  applyStagePixelRatio()
+  window.addEventListener('resize', applyStagePixelRatio)
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('keyup', handleWindowKeyup)
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  window.removeEventListener('resize', applyStagePixelRatio)
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('keyup', handleWindowKeyup)
 })
@@ -202,6 +237,16 @@ const gridShapeRenderKey = computed(
 )
 const shapeMap = computed(() => new Map(canvasStore.shapes.map((shape) => [shape.id, shape])))
 const selectedTextGuideId = ref<string | null>(null)
+const shapeGuideValueEditState = ref<{
+  shapeId: string
+  guideKey: 'length' | 'angle' | 'height'
+  itemIndex: number
+  rawX: number
+  rawY: number
+} | null>(null)
+const shapeGuideValue = ref('')
+const shapeGuideValueLabel = ref<'길이' | '각도' | '높이'>('길이')
+const shapeGuideApplyToGeometry = ref(false)
 
 const emit = defineEmits<{
   mouseMove: [pos: { x: number; y: number } | null]
@@ -267,7 +312,9 @@ const {
   transformDrag,
   guideTextDrag,
   hoveredTextGuideId,
+  hoveredBlankBoxGuideId,
   textGuideDrag,
+  blankBoxGuideDrag,
   textGuideTransformDrag,
   hoveredVertex,
   hoveredVertexKey,
@@ -282,8 +329,12 @@ const {
   handleShapeNodeMouseDown,
   handleTextGuideMouseEnter,
   handleTextGuideMouseLeave,
+  handleBlankBoxGuideMouseEnter,
+  handleBlankBoxGuideMouseLeave,
   handleTextGuideClick,
   handleTextGuideMouseDown,
+  handleBlankBoxGuideClick,
+  handleBlankBoxGuideMouseDown,
   handleTextGuideDblClick,
   handleTextGuideOverlayMouseDown,
   handleVertexHandleMouseDown,
@@ -298,6 +349,8 @@ const {
   handleTextGuideScaleHandleMouseDown,
   handleShapeGuideTextMouseDown,
   handleLatexPointLabelMouseDown,
+  handleLatexShapeGuideMouseDown,
+  handleLatexOverlayMouseUp,
   handleRotateHandleMouseDown,
   handleTextGuideRotateHandleMouseDown,
   handleShapeNodeMouseEnter,
@@ -338,6 +391,14 @@ watchEffect(() => {
   const stage = stageRef.value?.getNode?.()
   if (!stage) return
   const container = stage.container()
+  const isDraggingDraggable = !!shapeDrag.value
+    || !!guideTextDrag.value
+    || !!textGuideDrag.value
+    || !!blankBoxGuideDrag.value
+  const isHoveringDraggable = !!hoveredShapeId.value
+    || !!hoveredGuideTextKey.value
+    || !!hoveredTextGuideId.value
+    || !!hoveredBlankBoxGuideId.value
   if (toolStore.mode === 'select' && toolStore.zoom > 100 && panDrag.value) {
     container.style.cursor = 'grabbing'
     return
@@ -347,10 +408,16 @@ watchEffect(() => {
     return
   }
   if (toolStore.mode === 'select') {
-    if (hoveredVertex.value || vertexDrag.value) {
+    if (vertexDrag.value) {
+      container.style.cursor = 'grabbing'
+    } else if (hoveredVertex.value) {
       container.style.cursor = 'pointer'
+    } else if (isDraggingDraggable) {
+      container.style.cursor = 'grabbing'
+    } else if (isHoveringDraggable) {
+      container.style.cursor = 'grab'
     } else {
-      container.style.cursor = hoveredShapeId.value ? 'move' : 'default'
+      container.style.cursor = 'default'
     }
   } else {
     container.style.cursor = 'crosshair'
@@ -363,6 +430,14 @@ watchEffect(() => {
   }
 })
 
+watchEffect(() => {
+  stageRef.value
+  containerSize.value.width
+  containerSize.value.height
+  toolStore.zoom
+  applyStagePixelRatio()
+})
+
 function drawGridLines(context: any, shape: any) {
   const numCols = Math.ceil(stageWidth.value / GRID_CONFIG.size)
   const numRows = Math.ceil(stageHeight.value / GRID_CONFIG.size)
@@ -371,13 +446,13 @@ function drawGridLines(context: any, shape: any) {
   context.beginPath()
   for (let i = 0; i <= numCols; i++) {
     if (i % GRID_CONFIG.majorInterval === 0) continue
-    const x = i * GRID_CONFIG.size
+    const x = Math.round(i * GRID_CONFIG.size) + 0.5
     context.moveTo(x, 0)
     context.lineTo(x, stageHeight.value)
   }
   for (let i = 0; i <= numRows; i++) {
     if (i % GRID_CONFIG.majorInterval === 0) continue
-    const y = i * GRID_CONFIG.size
+    const y = Math.round(i * GRID_CONFIG.size) + 0.5
     context.moveTo(0, y)
     context.lineTo(stageWidth.value, y)
   }
@@ -390,13 +465,13 @@ function drawGridLines(context: any, shape: any) {
   context.beginPath()
   for (let i = 0; i <= numCols; i++) {
     if (i % GRID_CONFIG.majorInterval !== 0) continue
-    const x = i * GRID_CONFIG.size
+    const x = Math.round(i * GRID_CONFIG.size) + 0.5
     context.moveTo(x, 0)
     context.lineTo(x, stageHeight.value)
   }
   for (let i = 0; i <= numRows; i++) {
     if (i % GRID_CONFIG.majorInterval !== 0) continue
-    const y = i * GRID_CONFIG.size
+    const y = Math.round(i * GRID_CONFIG.size) + 0.5
     context.moveTo(0, y)
     context.lineTo(stageWidth.value, y)
   }
@@ -446,12 +521,21 @@ function handleClick(e: KonvaEventObject<MouseEvent>) {
   const pos = getLogicalPointerPos(stage)
   if (!pos) return
 
-  // Use sub-grid snap only for point-on-object, otherwise snap to main grid.
-  const useSubGrid = toolStore.mode === 'shape' && toolStore.shapeType === 'point-on-object'
+  const useSubGrid =
+    (toolStore.mode === 'shape' && (
+      toolStore.shapeType === 'point-on-object'
+      || toolStore.shapeType === 'arrow'
+      || toolStore.shapeType === 'arrow-curve'
+    ))
+    || (toolStore.mode === 'guide' && (
+      toolStore.guideType === 'text'
+      || toolStore.guideType === 'blank-box'
+    ))
   const point = useSubGrid ? snapToSubGrid(pos.x, pos.y) : snapToGrid(pos.x, pos.y)
 
   if (toolStore.mode === 'select') {
     canvasStore.selectShape(null)
+    canvasStore.selectGuide(null)
     selectedTextGuideId.value = null
   } else if (toolStore.mode === 'shape') {
     handleShapeClick(point)
@@ -476,12 +560,51 @@ function getTextGuideFontSize(guide: { fontSize?: number }): number {
   return guide.fontSize || DEFAULT_TEXT_FONT_SIZE
 }
 
+function getBlankBoxRect(guide: { points: Point[] }) {
+  const p1 = guide.points[0]
+  const p2 = guide.points[1]
+  if (!p1 || !p2) {
+    const width = BLANK_BASE_WIDTH_MM * MM_TO_PX
+    const height = BLANK_BASE_HEIGHT_MM * MM_TO_PX
+    return { x: 0, y: 0, width, height, cornerRadius: Math.min(height * 0.22, 8) }
+  }
+  const centerX = (p1.x + p2.x) / 2
+  const centerY = (p1.y + p2.y) / 2
+  const widthMm = Number((guide as any).blankWidthMm)
+  const width = Math.max(8, (Number.isFinite(widthMm) ? widthMm : BLANK_BASE_WIDTH_MM) * MM_TO_PX)
+  const height = BLANK_BASE_HEIGHT_MM * MM_TO_PX
+  const x = centerX - width / 2
+  const y = centerY - height / 2
+  return { x, y, width, height, cornerRadius: Math.min(height * 0.22, 8) }
+}
+
+function getBlankBoxUnitMode(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' }): 'none' | 'cm' | 'angle' {
+  return guide.blankUnitMode === 'cm' || guide.blankUnitMode === 'angle' ? guide.blankUnitMode : 'none'
+}
+
+function getBlankBoxSuffixText(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' }): string {
+  const mode = getBlankBoxUnitMode(guide)
+  if (mode === 'cm') return 'cm'
+  if (mode === 'angle') return '°'
+  return ''
+}
+
+function getBlankBoxSuffixPos(guide: { points: Point[], fontSize?: number, blankUnitMode?: 'none' | 'cm' | 'angle' }): { x: number, y: number } {
+  const rect = getBlankBoxRect(guide)
+  const fontSize = guide.fontSize || DEFAULT_TEXT_FONT_SIZE
+  return getGuideBlankTextPos(rect, fontSize, getBlankBoxUnitMode(guide) === 'cm' ? GRID_CONFIG.size / 2 : 4)
+}
+
 function getTextGuideRotation(guide: { rotation?: number }): number {
   return Number.isFinite(guide.rotation) ? Number(guide.rotation) : 0
 }
 
 function isTextGuideHighlighted(guideId: string): boolean {
   return hoveredTextGuideId.value === guideId || selectedTextGuideId.value === guideId
+}
+
+function isBlankBoxGuideHighlighted(guideId: string): boolean {
+  return hoveredBlankBoxGuideId.value === guideId || canvasStore.selectedGuideId === guideId
 }
 
 function handleTextGuideOverlayContextMenu(guideId: string, e: MouseEvent) {
@@ -529,6 +652,22 @@ function isGuideTextHighlighted(shapeId: string, guideKey: 'length' | 'angle' | 
     && guideTextDrag.value.guideKey === guideKey
     && guideTextDrag.value.itemIndex === itemIndex
   return dragging || hoveredGuideTextKey.value === key
+}
+
+function isTextGuideDragging(guideId: string): boolean {
+  return textGuideDrag.value?.guideId === guideId
+}
+
+function isPointGuideDragging(shapeId: string, pointIndex: number): boolean {
+  return guideTextDrag.value?.shapeId === shapeId
+    && guideTextDrag.value?.guideKey === 'pointName'
+    && guideTextDrag.value?.itemIndex === pointIndex
+}
+
+function isShapeGuideDragging(shapeId: string, guideKey: 'length' | 'angle' | 'height', itemIndex: number): boolean {
+  return guideTextDrag.value?.shapeId === shapeId
+    && guideTextDrag.value?.guideKey === guideKey
+    && guideTextDrag.value?.itemIndex === itemIndex
 }
 
 function handleGuideContextMenu(guideId: string, e: KonvaEventObject<PointerEvent>) {
@@ -606,6 +745,11 @@ function findGuideIdFromRawPoint(raw: { x: number, y: number }): string | null {
     } else if (guide.type === 'text') {
       const anchor = getTextGuideAnchor(guide)
       d = distPoint(anchor.x, anchor.y)
+    } else if (guide.type === 'blank-box' && guide.points.length >= 2) {
+      const rect = getBlankBoxRect(guide)
+      const centerX = rect.x + rect.width / 2
+      const centerY = rect.y + rect.height / 2
+      d = Math.hypot(raw.x - centerX, raw.y - centerY)
     } else if (guide.type === 'angle' && toolStore.showAngle) {
       if (isRightAngleGuide(guide.points)) {
         const marker = getRightAngleGuideMarkerPoints(guide.points[0], guide.points[1], guide.points[2], GUIDE_RIGHT_ANGLE_MARKER_SIZE)
@@ -753,11 +897,17 @@ function isShapeHeightDefaultVisible(shape: Shape): boolean {
 
 function isShapePointDefaultVisible(shape: Shape, _pointIndex: number): boolean {
   if (shape.type === 'point' || shape.type === 'point-on-object') return true
-  if (shape.type === 'circle') return false
+  if (shape.type === 'circle') return true
   return POINT_VISIBLE_DEFAULT_TYPES.has(shape.type)
 }
 
 function isShapePointVisible(shape: Shape, pointIndex: number): boolean {
+  if (shape.type === 'circle') {
+    const visible = typeof shape.guideVisibility?.point === 'boolean'
+      ? shape.guideVisibility.point
+      : isShapePointDefaultVisible(shape, pointIndex)
+    return visible && pointIndex === 0
+  }
   if (typeof shape.guideVisibility?.point === 'boolean') {
     return shape.guideVisibility.point
   }
@@ -798,6 +948,9 @@ function isShapeGuideItemVisible(shape: Shape, key: 'length' | 'angle' | 'pointN
   if (key === 'height') {
     return !shape.guideVisibility?.heightHiddenIndices?.includes(index)
   }
+  if (shape.type === 'circle') {
+    return index === 0 && !shape.guideVisibility?.pointNameHiddenIndices?.includes(index)
+  }
   return !shape.guideVisibility?.pointNameHiddenIndices?.includes(index)
 }
 
@@ -807,6 +960,297 @@ function getShapeGuideItemStyle(
   index: number
 ): ShapeGuideItemStyle {
   return shape.guideStyleMap?.[key]?.[index] ?? {}
+}
+
+function makePoint(x: number, y: number): Point {
+  return {
+    x,
+    y,
+    gridX: x / GRID_CONFIG.size,
+    gridY: y / GRID_CONFIG.size,
+  }
+}
+
+function parseNumericGuideValue(raw: string): number | null {
+  const normalized = raw.replace(/cm/gi, '').replace(/°/g, '').trim()
+  if (!normalized) return null
+  const value = Number(normalized)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return value
+}
+
+function clearShapeGuideCustomText(
+  shape: Shape,
+  key: 'length' | 'angle' | 'height',
+  index: number
+): Shape {
+  if (key === 'height') return shape
+  const map = { ...(shape.guideStyleMap || {}) }
+  const byKey = { ...(map[key] || {}) }
+  const prev = { ...(byKey[index] || {}) }
+  delete prev.customText
+  if (Object.keys(prev).length > 0) {
+    byKey[index] = prev
+  } else {
+    delete byKey[index]
+  }
+  if (Object.keys(byKey).length > 0) {
+    map[key] = byKey
+  } else {
+    delete map[key]
+  }
+  return {
+    ...shape,
+    guideStyleMap: Object.keys(map).length > 0 ? map : undefined,
+  }
+}
+
+function setShapeGuideCustomText(
+  shape: Shape,
+  key: 'length' | 'angle' | 'height',
+  index: number,
+  text: string
+): Shape {
+  const map = { ...(shape.guideStyleMap || {}) }
+  const byKey = { ...(map[key] || {}) }
+  const prev = { ...(byKey[index] || {}) }
+  byKey[index] = {
+    ...prev,
+    customText: text,
+  }
+  map[key] = byKey
+  return {
+    ...shape,
+    guideStyleMap: map,
+  }
+}
+
+function scaleShapePoints(points: Point[], center: Point, factor: number): Point[] {
+  return points.map((point) => makePoint(
+    center.x + (point.x - center.x) * factor,
+    center.y + (point.y - center.y) * factor,
+  ))
+}
+
+function updateShapeLengthByRatio(shape: Shape, itemIndex: number, targetValue: number): Shape {
+  if (shape.type === 'circle') {
+    const center = shape.points[0]
+    const edge = shape.points[1]
+    if (!center || !edge) return shape
+    const currentRadius = calculateDistance(center, edge)
+    const currentValue = shape.circleMeasureMode === 'diameter' ? currentRadius * 2 : currentRadius
+    if (currentValue <= 1e-6) return shape
+    const factor = targetValue / currentValue
+    const nextEdge = makePoint(
+      center.x + (edge.x - center.x) * factor,
+      center.y + (edge.y - center.y) * factor,
+    )
+    return clearShapeGuideCustomText({
+      ...shape,
+      points: [center, nextEdge],
+    }, 'length', 0)
+  }
+
+  const p1 = shape.points[itemIndex]
+  const p2 = shape.points[(itemIndex + 1) % shape.points.length]
+  if (!p1 || !p2) return shape
+  const currentLength = calculateDistance(p1, p2)
+  if (currentLength <= 1e-6) return shape
+  const factor = targetValue / currentLength
+  const center = shape.type === 'segment' || shape.type === 'ray' || shape.type === 'line' || shape.type === 'angle-line'
+    ? makePoint(
+      shape.points.reduce((sum, point) => sum + point.x, 0) / Math.max(1, shape.points.length),
+      shape.points.reduce((sum, point) => sum + point.y, 0) / Math.max(1, shape.points.length),
+    )
+    : makePoint(
+      shape.points.reduce((sum, point) => sum + point.x, 0) / Math.max(1, shape.points.length),
+      shape.points.reduce((sum, point) => sum + point.y, 0) / Math.max(1, shape.points.length),
+    )
+  return clearShapeGuideCustomText({
+    ...shape,
+    points: scaleShapePoints(shape.points, center, factor),
+  }, 'length', itemIndex)
+}
+
+function updateShapeHeightByRatio(shape: Shape, targetValue: number): Shape {
+  const heightGuide = getShapeHeightGuide(shape)
+  if (!heightGuide) return shape
+  const currentHeight = calculateDistance(heightGuide.apex, heightGuide.foot)
+  if (currentHeight <= 1e-6) return shape
+  const factor = targetValue / currentHeight
+  const baseIndex = getSharedShapeHeightBaseIndex(shape)
+  const baseAIndex = baseIndex
+  const baseBIndex = (baseIndex + 1) % shape.points.length
+  const baseA = shape.points[baseAIndex]
+  const baseB = shape.points[baseBIndex]
+  if (!baseA || !baseB) return shape
+
+  const dx = baseB.x - baseA.x
+  const dy = baseB.y - baseA.y
+  const lenSq = dx * dx + dy * dy
+  if (lenSq <= 1e-6) return shape
+
+  const nextPoints = shape.points.map((point, index) => {
+    if (index === baseAIndex || index === baseBIndex) return point
+    const t = ((point.x - baseA.x) * dx + (point.y - baseA.y) * dy) / lenSq
+    const projX = baseA.x + dx * t
+    const projY = baseA.y + dy * t
+    const offX = point.x - projX
+    const offY = point.y - projY
+    return makePoint(projX + offX * factor, projY + offY * factor)
+  })
+
+  return {
+    ...shape,
+    points: nextPoints,
+  }
+}
+
+function normalizeAngleDeltaRadians(radians: number): number {
+  let next = radians
+  while (next <= -Math.PI) next += Math.PI * 2
+  while (next > Math.PI) next -= Math.PI * 2
+  return next
+}
+
+function updateShapeAngleByValue(shape: Shape, itemIndex: number, targetValue: number): Shape {
+  const pointCount = shape.points.length
+  if (pointCount < 3) return shape
+  const prevIndex = (itemIndex - 1 + pointCount) % pointCount
+  const nextIndex = (itemIndex + 1) % pointCount
+  const prev = shape.points[prevIndex]
+  const vertex = shape.points[itemIndex]
+  const next = shape.points[nextIndex]
+  if (!prev || !vertex || !next) return shape
+
+  const prevAngle = Math.atan2(prev.y - vertex.y, prev.x - vertex.x)
+  const nextAngle = Math.atan2(next.y - vertex.y, next.x - vertex.x)
+  const currentDiff = normalizeAngleDeltaRadians(nextAngle - prevAngle)
+  const currentSign = currentDiff >= 0 ? 1 : -1
+  const targetRadians = Math.min(179.9, Math.max(0.1, targetValue)) * (Math.PI / 180)
+  const targetDiff = currentSign * targetRadians
+  const delta = normalizeAngleDeltaRadians((prevAngle + targetDiff) - nextAngle)
+
+  const indicesToRotate: number[] = []
+  if (shape.type === 'angle-line') {
+    indicesToRotate.push(nextIndex)
+  } else {
+    let cursor = nextIndex
+    while (cursor !== prevIndex) {
+      indicesToRotate.push(cursor)
+      cursor = (cursor + 1) % pointCount
+      if (cursor === itemIndex) break
+    }
+  }
+
+  const nextPoints = shape.points.map((point, index) => {
+    if (!indicesToRotate.includes(index)) return point
+    const dx = point.x - vertex.x
+    const dy = point.y - vertex.y
+    const cos = Math.cos(delta)
+    const sin = Math.sin(delta)
+    return makePoint(
+      vertex.x + (dx * cos) - (dy * sin),
+      vertex.y + (dx * sin) + (dy * cos),
+    )
+  })
+
+  return clearShapeGuideCustomText({
+    ...shape,
+    points: nextPoints,
+  }, 'angle', itemIndex)
+}
+
+function startShapeGuideValueEdit(shape: Shape, key: 'length' | 'angle' | 'height', itemIndex: number) {
+  const anchor = getShapeGuideLabelWorldPos(shape, key, itemIndex)
+  shapeGuideValueEditState.value = {
+    shapeId: shape.id,
+    guideKey: key,
+    itemIndex,
+    rawX: anchor.x + 6,
+    rawY: anchor.y + 6,
+  }
+  shapeGuideValueLabel.value = key === 'angle' ? '각도' : key === 'height' ? '높이' : '길이'
+  shapeGuideApplyToGeometry.value = false
+  shapeGuideValue.value = key === 'angle'
+    ? getShapeAngleValueText(shape, itemIndex).replace(/°$/, '').trim()
+    : key === 'height'
+      ? getShapeHeightValueText(shape).replace(/cm$/i, '').trim()
+      : getShapeLengthValueText(shape, itemIndex).replace(/cm$/i, '').trim()
+}
+
+function cancelShapeGuideValueEdit() {
+  shapeGuideValueEditState.value = null
+  shapeGuideValue.value = ''
+  shapeGuideApplyToGeometry.value = false
+}
+
+function getActualShapeGuideNumericValue(shape: Shape, key: 'length' | 'angle' | 'height', itemIndex: number): string {
+  if (key === 'angle') {
+    const triplet = getShapeAngleTriplet(shape, itemIndex)
+    if (!triplet) return ''
+    return formatRoundedValue(computeAngleDegrees(triplet.prev, triplet.vertex, triplet.next))
+  }
+  if (key === 'height') {
+    const heightGuide = getShapeHeightGuide(shape)
+    if (!heightGuide) return ''
+    return formatRoundedValue(calculateDistance(heightGuide.apex, heightGuide.foot))
+  }
+  if (shape.type === 'circle') {
+    const center = shape.points[0]
+    const edge = shape.points[1]
+    if (!center || !edge) return ''
+    const radius = calculateDistance(center, edge)
+    return formatRoundedValue(shape.circleMeasureMode === 'diameter' ? radius * 2 : radius)
+  }
+  const p1 = shape.points[itemIndex]
+  const p2 = shape.points[(itemIndex + 1) % shape.points.length]
+  if (!p1 || !p2) return ''
+  return formatRoundedValue(calculateDistance(p1, p2))
+}
+
+function resetShapeGuideValueEdit() {
+  const state = shapeGuideValueEditState.value
+  if (!state) return
+  const shape = shapeMap.value.get(state.shapeId)
+  if (!shape) return
+  shapeGuideValue.value = getActualShapeGuideNumericValue(shape, state.guideKey, state.itemIndex)
+}
+
+function confirmShapeGuideValueEdit() {
+  const state = shapeGuideValueEditState.value
+  if (!state) return
+  const numericValue = parseNumericGuideValue(shapeGuideValue.value)
+  if (numericValue === null) {
+    cancelShapeGuideValueEdit()
+    return
+  }
+  canvasStore.updateShape(state.shapeId, (shape) => {
+    if (!shapeGuideApplyToGeometry.value) {
+      const displayText = state.guideKey === 'angle'
+        ? `${formatRoundedValue(numericValue)}°`
+        : formatRoundedValue(numericValue)
+      return setShapeGuideCustomText(shape, state.guideKey, state.itemIndex, displayText)
+    }
+    if (state.guideKey === 'length') {
+      return updateShapeLengthByRatio(shape, state.itemIndex, numericValue)
+    }
+    if (state.guideKey === 'height') {
+      return updateShapeHeightByRatio(shape, numericValue)
+    }
+    return updateShapeAngleByValue(shape, state.itemIndex, numericValue)
+  })
+  cancelShapeGuideValueEdit()
+}
+
+function handleShapeGuideValueDblClick(
+  shape: Shape,
+  key: 'length' | 'angle' | 'height',
+  itemIndex: number,
+  e: { cancelBubble: boolean }
+) {
+  e.cancelBubble = true
+  startShapeGuideValueEdit(shape, key, itemIndex)
 }
 
 function isShapeGuideItemBlank(shape: Shape, key: 'length' | 'angle' | 'pointName' | 'height', index: number): boolean {
@@ -842,12 +1286,16 @@ function getShapeGuideItemOffset(shape: Shape, key: 'length' | 'angle' | 'pointN
   }
 }
 
+function isDetachedShapeGuideItem(shape: Shape, key: 'length' | 'angle' | 'pointName' | 'height', index: number): boolean {
+  return getShapeGuideItemStyle(shape, key, index).detached === true
+}
+
 function getLengthGuideCurvePoints(guide: { points: { x: number, y: number }[] }): number[] {
   return getSharedLengthGuideCurvePoints(guide)
 }
 
 function getLengthGuideLabelPos(guide: { points: { x: number, y: number }[] }): { x: number, y: number } {
-  return getSharedLengthGuideLabelPos(guide)
+  return snapTextPoint(getSharedLengthGuideLabelPos(guide))
 }
 
 function getShapePointNameDefaultPos(shape: Shape, index: number): { x: number, y: number } {
@@ -861,6 +1309,8 @@ function getShapePointNameTextPos(shape: Shape, index: number): { x: number, y: 
 }
 
 function getShapeAngleValueText(shape: Shape, index: number): string {
+  const customText = getShapeGuideItemStyle(shape, 'angle', index).customText?.trim()
+  if (customText) return customText
   const triplet = getShapeAngleTriplet(shape, index)
   if (!triplet) return ''
   return formatAngleDegrees(computeAngleDegrees(triplet.prev, triplet.vertex, triplet.next))
@@ -869,7 +1319,7 @@ function getShapeAngleValueText(shape: Shape, index: number): string {
 function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: number } {
   const angleText = getShapeAngleValueText(shape, index)
   const fontSize = getShapeGuideItemStyle(shape, 'angle', index).fontSize || DEFAULT_TEXT_FONT_SIZE
-  return getSharedShapeAngleLabelPos(
+  return snapTextPoint(getSharedShapeAngleLabelPos(
     shape,
     index,
     getTextWidthPx(angleText, fontSize),
@@ -891,47 +1341,21 @@ function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: num
       rightAngleVerticalBaseRatio: RIGHT_ANGLE_LABEL_VERTICAL_BASE_RATIO,
       rightAngleVerticalQuadrantRatio: RIGHT_ANGLE_LABEL_VERTICAL_QUADRANT_RATIO
     }
-  )
+  ))
 }
 
 function getShapeAngleTextOffsetX(_shape: Shape, _index: number, text: string, fontSize: number): number {
-  return getTextWidthPx(text, fontSize) * 0.5
+  return snapTextValue(getTextWidthPx(text, fontSize) * 0.5)
 }
 
 function getShapeAngleTextOffsetY(_shape: Shape, _index: number, fontSize: number): number {
-  return fontSize * 0.1
+  return snapTextValue(fontSize * 0.1)
 }
 
 function logAngleGuidePlacement(shapeId: string, angleIndex: number) {
   const shape = shapeMap.value.get(shapeId)
   if (!shape) return
-  const base = getShapeAngleLabelPos(shape, angleIndex)
-  const offset = getShapeGuideItemOffset(shape, 'angle', angleIndex)
-  const text = getShapeAngleValueText(shape, angleIndex)
-  const fontSize = getShapeGuideItemStyle(shape, 'angle', angleIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
-  const payload = {
-    shapeId,
-    angleIndex,
-    text,
-    fontSize,
-    base,
-    offset,
-    final: {
-      x: base.x + offset.x,
-      y: base.y + offset.y
-    },
-    renderOffset: {
-      x: getShapeAngleTextOffsetX(shape, angleIndex, text, fontSize),
-      y: getShapeAngleTextOffsetY(shape, angleIndex, fontSize)
-    },
-    constants: {
-      ANGLE_ARC_RADIUS,
-      ANGLE_LABEL_OUTER_GAP_PX,
-      RIGHT_ANGLE_LABEL_DIST_MULTIPLIER,
-      ANGLE_LABEL_EDGE_PADDING_PX
-    }
-  }
-  console.log('[AngleGuideDebug]', JSON.stringify(payload))
+  getShapeAngleLabelPos(shape, angleIndex)
 }
 
 function getShapeAngleArcPolyline(shape: Shape, index: number): number[] {
@@ -1141,13 +1565,14 @@ function getShapeGuideBlankTextPos(
   index: number,
   kind: 'unit' | 'suffix'
 ): { x: number, y: number } {
-  return kind === 'unit'
+  const pos = kind === 'unit'
     ? getShapeGuideBlankUnitPos(shape, key === 'angle' ? 'length' : key, index)
     : getShapeGuideBlankSuffixPos(shape, key, index)
+  return pos
 }
 
 function formatLengthValue(value: number): string {
-  const base = value.toFixed(1)
+  const base = formatRoundedValue(value)
   return toolStore.showGuideUnit ? `${base}cm` : base
 }
 
@@ -1157,6 +1582,10 @@ function stripGuideUnit(text: string): string {
 
 function getLengthMainText(text: string): string {
   return stripGuideUnit(text)
+}
+
+function getLengthLatexText(text: string): string {
+  return toLengthLatex(text, toolStore.showGuideUnit)
 }
 
 const textMeasureCanvas = ref<HTMLCanvasElement | null>(null)
@@ -1173,11 +1602,11 @@ function getTextWidthPx(text: string, fontSize: number): number {
 }
 
 function getUnitYFromCenteredText(centerY: number, fontSize: number): number {
-  return centerY - (fontSize * 0.45)
+  return snapTextValue(centerY - (fontSize * 0.45))
 }
 
 function getLengthUnitGapPx(): number {
-  return GRID_CONFIG.size / 2
+  return GRID_CONFIG.size * 0.5
 }
 
 function getLengthMainOffsetFromAnchor(
@@ -1199,10 +1628,10 @@ function getLengthUnitXFromAnchor(
   withUnit: boolean,
   align: 'center' | 'left' | 'right'
 ): number {
-  if (!withUnit) return anchorX
+  if (!withUnit) return snapTextValue(anchorX)
   const mainWidth = getTextWidthPx(mainText, fontSize)
   const unitWidth = getTextWidthPx('cm', fontSize)
-  return getSharedLengthUnitXFromAnchor(anchorX, mainWidth, unitWidth, getLengthUnitGapPx(), align)
+  return snapTextValue(getSharedLengthUnitXFromAnchor(anchorX, mainWidth, unitWidth, getLengthUnitGapPx(), align))
 }
 
 function getUnitVisualRectFromTopLeft(
@@ -1252,6 +1681,8 @@ function getLengthBlankGuideRectWithUnit(
 }
 
 function getShapeLengthValueText(shape: Shape, index: number): string {
+  const customText = getShapeGuideItemStyle(shape, 'length', index).customText?.trim()
+  if (customText) return customText
   const p1 = shape.points[index]
   const p2 = shape.points[(index + 1) % shape.points.length]
   if (!p1 || !p2) return ''
@@ -1291,7 +1722,7 @@ function getCircleLengthLabelPos(shape: Shape): { x: number, y: number } {
   const mainText = getLengthMainText(getCircleLengthValueText(shape))
   const mainWidth = getTextWidthPx(mainText, fontSize)
   const unitWidth = toolStore.showGuideUnit ? getTextWidthPx('cm', fontSize) : 0
-  return getSharedCircleLengthLabelPos(
+  return snapTextPoint(getSharedCircleLengthLabelPos(
     shape,
     { ...p1, gridX: p1.x / GRID_CONFIG.size, gridY: p1.y / GRID_CONFIG.size },
     { ...p2, gridX: p2.x / GRID_CONFIG.size, gridY: p2.y / GRID_CONFIG.size },
@@ -1301,7 +1732,7 @@ function getCircleLengthLabelPos(shape: Shape): { x: number, y: number } {
     toolStore.showGuideUnit ? getLengthUnitGapPx() : 0,
     shape.points[0],
     curveSide
-  )
+  ))
 }
 
 function getCircleLengthLabelWorldPos(shape: Shape): { x: number, y: number } {
@@ -1390,6 +1821,8 @@ function getCircleGuideMeasureLineWidth(shape: Shape): number {
 }
 
 function getShapeHeightValueText(shape: Shape): string {
+  const customText = getShapeGuideItemStyle(shape, 'height', 0).customText?.trim()
+  if (customText) return customText
   const h = getShapeHeightGuide(shape)
   if (!h) return ''
   return formatLengthValue(calculateDistance(h.apex, h.foot))
@@ -1401,7 +1834,7 @@ function getShapeHeightLabelPos(shape: Shape): { x: number, y: number } {
   const fontSize = getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
   const mainWidth = getTextWidthPx(getLengthMainText(getShapeHeightValueText(shape)), fontSize)
   const unitWidth = toolStore.showGuideUnit ? getTextWidthPx('cm', fontSize) : 0
-  return getSharedShapeHeightLabelPos(
+  return snapTextPoint(getSharedShapeHeightLabelPos(
     shape,
     h,
     mainWidth,
@@ -1409,7 +1842,7 @@ function getShapeHeightLabelPos(shape: Shape): { x: number, y: number } {
     unitWidth,
     toolStore.showGuideUnit ? getLengthUnitGapPx() : 0,
     HEIGHT_LABEL_HORIZONTAL_OFFSET_PX
-  )
+  ))
 }
 
 function getShapeHeightLabelWorldPos(shape: Shape): { x: number, y: number } {
@@ -1552,7 +1985,7 @@ function getShapeLengthLabelPos(shape: Shape, index: number): { x: number, y: nu
   const mainText = getLengthMainText(getShapeLengthValueText(shape, index))
   const mainWidth = getTextWidthPx(mainText, fontSize)
   const unitWidth = toolStore.showGuideUnit ? getTextWidthPx('cm', fontSize) : 0
-  return getSharedShapeLengthLabelPos(
+  return snapTextPoint(getSharedShapeLengthLabelPos(
     shape,
     index,
     mainWidth,
@@ -1563,7 +1996,7 @@ function getShapeLengthLabelPos(shape: Shape, index: number): { x: number, y: nu
     curveSide,
     getShapeHeightGuide(shape),
     BASE_LABEL_VERTICAL_BIAS_PX
-  )
+  ))
 }
 
 function getShapeLengthTextAnchorMode(_shape: Shape, _index: number): 'center' | 'left' | 'right' {
@@ -1572,7 +2005,7 @@ function getShapeLengthTextAnchorMode(_shape: Shape, _index: number): 'center' |
 
 function getShapeLengthTextOffsetX(shape: Shape, index: number, text: string, fontSize: number, withUnit: boolean): number {
   const mode = getShapeLengthTextAnchorMode(shape, index)
-  return getLengthMainOffsetFromAnchor(text, fontSize, withUnit, mode)
+  return snapTextValue(getLengthMainOffsetFromAnchor(text, fontSize, withUnit, mode))
 }
 
 function getShapeLengthUnitX(shape: Shape, index: number, anchorX: number, mainText: string, fontSize: number, withUnit: boolean): number {
@@ -1806,6 +2239,204 @@ function handleLatexPointOverlayContextMenu(
   })
 }
 
+function handleLatexShapeGuideOverlayDblClick(
+  shapeId: string,
+  guideKey: 'length' | 'angle' | 'height',
+  itemIndex: number
+) {
+  const shape = shapeMap.value.get(shapeId)
+  if (!shape) return
+  startShapeGuideValueEdit(shape, guideKey, itemIndex)
+}
+
+function handleLatexShapeGuideOverlayContextMenu(
+  shapeId: string,
+  guideKey: 'length' | 'angle' | 'height',
+  itemIndex: number,
+  e: MouseEvent
+) {
+  e.preventDefault()
+  emit('contextmenu', {
+    x: e.clientX,
+    y: e.clientY,
+    target: { kind: 'shape-guide-item', shapeId, guideKey, itemIndex }
+  })
+}
+
+function getShapeGuideLatexTopLeft(shape: Shape, key: 'length' | 'angle' | 'height', itemIndex: number): { x: number, y: number } {
+  const anchor = getShapeGuideLabelWorldPos(shape, key, itemIndex)
+  const fontSize = getShapeGuideItemStyle(shape, key, itemIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
+  if (key === 'angle') {
+    const text = getShapeAngleValueText(shape, itemIndex)
+    return {
+      x: snapTextValue(anchor.x - (getTextWidthPx(text.replace(/°$/, '') + ' °', fontSize) * 0.5)),
+      y: snapTextValue(anchor.y - getShapeAngleTextOffsetY(shape, itemIndex, fontSize))
+    }
+  }
+  const mainText = key === 'height'
+    ? getShapeHeightValueText(shape)
+    : shape.type === 'circle'
+      ? getCircleLengthValueText(shape)
+      : getShapeLengthValueText(shape, itemIndex)
+  const displayText = toolStore.showGuideUnit ? `${getLengthMainText(mainText)} cm` : getLengthMainText(mainText)
+  const offsetX = getTextWidthPx(displayText, fontSize) * 0.5
+  return {
+    x: snapTextValue(anchor.x - offsetX),
+    y: snapTextValue(anchor.y - (fontSize * 0.45))
+  }
+}
+
+function getShapeGuideLatexAnchorX(shape: Shape, key: 'length' | 'angle' | 'height', itemIndex: number): number {
+  return getShapeGuideLabelWorldPos(shape, key, itemIndex).x
+}
+
+const latexShapeGuideOverlays = computed(() => {
+  const overlays: Array<{
+    key: string
+    x: number
+    y: number
+    html: string
+    shapeId: string
+    guideKey: 'length' | 'angle' | 'height'
+    itemIndex: number
+    color: string
+    fontSize: number
+    interactive?: boolean
+    centerAlign?: boolean
+  }> = []
+
+  for (const shape of canvasStore.shapes) {
+    if (shape.visible === false) continue
+
+    if (toolStore.showLength && (shape.type === 'circle' ? isShapeGuideVisible(shape, 'radius') : isShapeGuideVisible(shape, 'length'))) {
+      const indices = shape.type === 'circle' ? [0] : getShapeAutoLengthIndices(shape)
+      for (const itemIndex of indices) {
+        if (!isShapeGuideItemVisible(shape, 'length', itemIndex)) continue
+        if (isShapeGuideItemBlank(shape, 'length', itemIndex)) {
+          if (toolStore.showGuideUnit) {
+            const pos = getShapeGuideBlankTextPos(shape, 'length', itemIndex, 'unit')
+            overlays.push({
+              key: `${shape.id}-length-${itemIndex}-blank-unit`,
+              x: pos.x,
+              y: pos.y,
+              html: renderLatexLikeHtml(toBlankUnitLatex(), true),
+              shapeId: shape.id,
+              guideKey: 'length',
+              itemIndex,
+              color: getShapeGuideTextColor(shape, 'length', itemIndex, DEFAULT_TEXT_COLOR),
+              fontSize: getShapeGuideItemStyle(shape, 'length', itemIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
+            })
+          }
+          continue
+        }
+        const text = shape.type === 'circle'
+          ? getLengthLatexText(getCircleLengthValueText(shape))
+          : getLengthLatexText(getShapeLengthValueText(shape, itemIndex))
+        if (!text) continue
+        const pos = getShapeGuideLatexTopLeft(shape, 'length', itemIndex)
+        overlays.push({
+          key: `${shape.id}-length-${itemIndex}`,
+          x: getShapeGuideLatexAnchorX(shape, 'length', itemIndex),
+          y: pos.y,
+          html: renderLatexLikeHtml(text, true),
+          shapeId: shape.id,
+          guideKey: 'length',
+          itemIndex,
+          color: getShapeGuideTextColor(shape, 'length', itemIndex, DEFAULT_TEXT_COLOR),
+          fontSize: getShapeGuideItemStyle(shape, 'length', itemIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
+          centerAlign: true
+        })
+      }
+    }
+
+    if (toolStore.showHeight && isShapeGuideVisible(shape, 'height') && isShapeGuideItemVisible(shape, 'height', 0) && getShapeHeightGuide(shape)) {
+      if (isShapeGuideItemBlank(shape, 'height', 0)) {
+        if (toolStore.showGuideUnit) {
+          const pos = getShapeGuideBlankTextPos(shape, 'height', 0, 'unit')
+          overlays.push({
+            key: `${shape.id}-height-0-blank-unit`,
+            x: pos.x,
+            y: pos.y,
+            html: renderLatexLikeHtml(toBlankUnitLatex(), true),
+            shapeId: shape.id,
+            guideKey: 'height',
+            itemIndex: 0,
+            color: getShapeGuideTextColor(shape, 'height', 0, DEFAULT_TEXT_COLOR),
+            fontSize: getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
+          })
+        }
+      } else {
+        const text = getLengthLatexText(getShapeHeightValueText(shape))
+        if (text) {
+          const pos = getShapeGuideLatexTopLeft(shape, 'height', 0)
+          overlays.push({
+            key: `${shape.id}-height-0`,
+            x: getShapeGuideLatexAnchorX(shape, 'height', 0),
+            y: pos.y,
+            html: renderLatexLikeHtml(text, true),
+            shapeId: shape.id,
+            guideKey: 'height',
+            itemIndex: 0,
+            color: getShapeGuideTextColor(shape, 'height', 0, DEFAULT_TEXT_COLOR),
+            fontSize: getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
+            centerAlign: true
+          })
+        }
+      }
+    }
+
+    if (toolStore.showAngle && isShapeGuideVisible(shape, 'angle')) {
+      for (const itemIndex of getShapeAutoAngleIndices(shape, toolStore.angleDisplayMode)) {
+        if (!isShapeGuideItemVisible(shape, 'angle', itemIndex)) continue
+        if (isShapeGuideItemBlank(shape, 'angle', itemIndex)) {
+          const pos = getShapeGuideBlankTextPos(shape, 'angle', itemIndex, 'suffix')
+          overlays.push({
+            key: `${shape.id}-angle-${itemIndex}-blank-suffix`,
+            x: pos.x - 3,
+            y: pos.y - 3,
+            html: renderLatexLikeHtml(toBlankAngleLatex(), true),
+            shapeId: shape.id,
+            guideKey: 'angle',
+            itemIndex,
+            color: getShapeGuideTextColor(shape, 'angle', itemIndex, DEFAULT_TEXT_COLOR),
+            fontSize: getShapeGuideItemStyle(shape, 'angle', itemIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
+          })
+          continue
+        }
+        const text = getShapeAngleValueText(shape, itemIndex)
+        if (!text) continue
+        const pos = getShapeGuideLatexTopLeft(shape, 'angle', itemIndex)
+        overlays.push({
+          key: `${shape.id}-angle-${itemIndex}`,
+          x: getShapeGuideLatexAnchorX(shape, 'angle', itemIndex),
+          y: pos.y,
+          html: renderLatexLikeHtml(toAngleLatex(text), true),
+          shapeId: shape.id,
+          guideKey: 'angle',
+          itemIndex,
+          color: getShapeGuideTextColor(shape, 'angle', itemIndex, DEFAULT_TEXT_COLOR),
+          fontSize: getShapeGuideItemStyle(shape, 'angle', itemIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
+          centerAlign: true
+        })
+      }
+    }
+  }
+
+  return overlays
+})
+
+function shouldRenderCanvasPointName(): boolean {
+  return false
+}
+
+function shouldRenderCanvasTextGuide(): boolean {
+  return false
+}
+
+function shouldRenderCanvasShapeGuideValue(): boolean {
+  return false
+}
+
 // ── 진짜 벡터 SVG 내보내기 ───────────────────────────────────────────
 const { exportImage } = useCanvasExport({
   stageRef,
@@ -1973,7 +2604,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 0, $event)"
             />
             <v-text
-              v-if="toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0) && !shape.pointLabelLatex?.[0]"
+              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
               @dblclick="handlePointLabelDblClick(shape, 0, $event)"
               :config="{
                 x: getShapePointNameTextPos(shape, 0).x,
@@ -2190,7 +2821,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', pIndex, $event)"
               />
               <v-text
-                v-if="isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
+                v-if="false && isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
                 :config="{
                   x: getShapeGuideBlankTextPos(shape, 'length', pIndex, 'unit').x,
                   y: getShapeGuideBlankTextPos(shape, 'length', pIndex, 'unit').y,
@@ -2203,7 +2834,7 @@ defineExpose({ exportImage })
                 }"
               />
               <v-text
-                v-if="!isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex)"
+                v-if="shouldRenderCanvasShapeGuideValue() && !isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex)"
                 :config="{
                   x: getShapeGuideLabelWorldPos(shape, 'length', pIndex).x,
                   y: getShapeGuideLabelWorldPos(shape, 'length', pIndex).y,
@@ -2225,13 +2856,14 @@ defineExpose({ exportImage })
                   shadowBlur: isGuideTextHighlighted(shape.id, 'length', pIndex) ? 8 : 0,
                   shadowOpacity: isGuideTextHighlighted(shape.id, 'length', pIndex) ? 0.45 : 0
                 }"
+                @dblclick="handleShapeGuideValueDblClick(shape, 'length', pIndex, $event)"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'length', pIndex)"
                 @mouseleave="handleGuideTextMouseLeave"
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'length', pIndex, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', pIndex, $event)"
               />
               <v-text
-                v-if="!isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
+                v-if="shouldRenderCanvasShapeGuideValue() && !isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
                 :config="{
                   x: getShapeLengthUnitX(
                     shape,
@@ -2354,7 +2986,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
               />
               <v-text
-                v-if="getShapeHeightGuide(shape) && isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
+                v-if="false && getShapeHeightGuide(shape) && isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
                 :config="{
                   x: getShapeGuideBlankTextPos(shape, 'height', 0, 'unit').x,
                   y: getShapeGuideBlankTextPos(shape, 'height', 0, 'unit').y,
@@ -2367,7 +2999,7 @@ defineExpose({ exportImage })
                 }"
               />
               <v-text
-                v-if="getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0)"
+                v-if="shouldRenderCanvasShapeGuideValue() && getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0)"
                 :config="{
                   x: getShapeGuideLabelWorldPos(shape, 'height', 0).x,
                   y: getShapeGuideLabelWorldPos(shape, 'height', 0).y,
@@ -2385,13 +3017,14 @@ defineExpose({ exportImage })
                   offsetY: (getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE) * 0.45,
                   listening: true
                 }"
+                @dblclick="handleShapeGuideValueDblClick(shape, 'height', 0, $event)"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'height', 0)"
                 @mouseleave="handleGuideTextMouseLeave"
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'height', 0, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
               />
               <v-text
-                v-if="getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
+                v-if="shouldRenderCanvasShapeGuideValue() && getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
                 :config="{
                   x: getLengthUnitXFromAnchor(
                     getShapeGuideLabelWorldPos(shape, 'height', 0).x,
@@ -2452,7 +3085,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
               <v-rect
-                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeGuideBlankRect(shape, 'angle', angleIndex).x,
                   y: getShapeGuideBlankRect(shape, 'angle', angleIndex).y,
@@ -2473,7 +3106,7 @@ defineExpose({ exportImage })
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
               <v-text
-                v-if="toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="false && toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeGuideBlankTextPos(shape, 'angle', angleIndex, 'suffix').x - 3,
                   y: getShapeGuideBlankTextPos(shape, 'angle', angleIndex, 'suffix').y - 3,
@@ -2486,7 +3119,7 @@ defineExpose({ exportImage })
                 }"
               />
               <v-text
-                v-if="toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isShapeGuideItemBlank(shape, 'angle', angleIndex)"
+                v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
                 :config="{
                   x: getShapeGuideLabelWorldPos(shape, 'angle', angleIndex).x,
                   y: getShapeGuideLabelWorldPos(shape, 'angle', angleIndex).y,
@@ -2511,6 +3144,7 @@ defineExpose({ exportImage })
                   shadowBlur: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? 8 : 0,
                   shadowOpacity: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? 0.45 : 0
                 }"
+                @dblclick="handleShapeGuideValueDblClick(shape, 'angle', angleIndex, $event)"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'angle', angleIndex)"
                 @mouseleave="handleGuideTextMouseLeave"
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'angle', angleIndex, $event)"
@@ -2542,7 +3176,7 @@ defineExpose({ exportImage })
                   @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', pIndex, $event)"
                 />
                 <v-text
-                  v-if="!isShapeGuideItemBlank(shape, 'pointName', pIndex) && !shape.pointLabelLatex?.[pIndex] && isShapeGuideItemVisible(shape, 'pointName', pIndex)"
+                  v-if="shouldRenderCanvasPointName() && !isShapeGuideItemBlank(shape, 'pointName', pIndex) && isShapeGuideItemVisible(shape, 'pointName', pIndex)"
                   @dblclick="handlePointLabelDblClick(shape, pIndex, $event)"
                   :config="{
                     x: getShapePointNameTextPos(shape, pIndex).x,
@@ -2664,7 +3298,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 0, $event)"
             />
             <v-text
-              v-if="toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0) && !shape.pointLabelLatex?.[0]"
+              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
               @dblclick="handlePointLabelDblClick(shape, 0, $event)"
               :config="{
                 x: getShapePointNameTextPos(shape, 0).x,
@@ -2707,7 +3341,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 1, $event)"
             />
             <v-text
-              v-if="toolStore.showPointName && shape.points[1] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 1) && !isShapeGuideItemBlank(shape, 'pointName', 1) && !shape.pointLabelLatex?.[1]"
+              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && shape.points[1] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 1) && !isShapeGuideItemBlank(shape, 'pointName', 1)"
               @dblclick="handlePointLabelDblClick(shape, 1, $event)"
               :config="{
                 x: getShapePointNameTextPos(shape, 1).x,
@@ -2750,7 +3384,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 2, $event)"
             />
             <v-text
-              v-if="toolStore.showPointName && shape.points[2] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 2) && !isShapeGuideItemBlank(shape, 'pointName', 2) && !shape.pointLabelLatex?.[2]"
+              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && shape.points[2] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 2) && !isShapeGuideItemBlank(shape, 'pointName', 2)"
               @dblclick="handlePointLabelDblClick(shape, 2, $event)"
               :config="{
                 x: getShapePointNameTextPos(shape, 2).x,
@@ -2833,7 +3467,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', 0, $event)"
             />
             <v-text
-              v-if="toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
+              v-if="false && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
               :config="{
                 x: getShapeGuideBlankTextPos(shape, 'length', 0, 'unit').x,
                 y: getShapeGuideBlankTextPos(shape, 'length', 0, 'unit').y,
@@ -2846,7 +3480,7 @@ defineExpose({ exportImage })
               }"
             />
             <v-text
-              v-if="toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0)"
+              v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0)"
               :config="{
                 x: getCircleLengthLabelWorldPos(shape).x,
                 y: getCircleLengthLabelWorldPos(shape).y,
@@ -2874,7 +3508,7 @@ defineExpose({ exportImage })
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', 0, $event)"
             />
             <v-text
-              v-if="toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
+              v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
               :config="{
                 x: getShapeLengthUnitX(
                   shape,
@@ -3075,7 +3709,7 @@ defineExpose({ exportImage })
           </template>
 
           <!-- Text guides -->
-          <template v-if="guide.type === 'text' && guide.visible !== false && !guide.useLatex">
+          <template v-if="shouldRenderCanvasTextGuide() && guide.type === 'text' && guide.visible !== false">
             <v-text
               @click="handleTextGuideClick(guide.id, $event)"
               @mousedown="handleTextGuideMouseDown(guide.id, $event)"
@@ -3099,6 +3733,45 @@ defineExpose({ exportImage })
                 shadowColor: isTextGuideHighlighted(guide.id) ? '#38BDF8' : 'transparent',
                 shadowBlur: isTextGuideHighlighted(guide.id) ? 10 : 0,
                 shadowOpacity: isTextGuideHighlighted(guide.id) ? 0.7 : 0
+              }"
+            />
+          </template>
+
+          <template v-if="guide.type === 'blank-box' && guide.visible !== false">
+            <v-rect
+              @click="handleBlankBoxGuideClick(guide.id, $event)"
+              @mousedown="handleBlankBoxGuideMouseDown(guide.id, $event)"
+              @mouseenter="handleBlankBoxGuideMouseEnter(guide.id)"
+              @mouseleave="handleBlankBoxGuideMouseLeave(guide.id)"
+              @contextmenu="handleGuideContextMenu(guide.id, $event)"
+              :config="{
+                name: getGuideNodeName(guide.id),
+                x: getBlankBoxRect(guide).x,
+                y: getBlankBoxRect(guide).y,
+                width: getBlankBoxRect(guide).width,
+                height: getBlankBoxRect(guide).height,
+                cornerRadius: getBlankBoxRect(guide).cornerRadius,
+                stroke: isBlankBoxGuideHighlighted(guide.id) ? '#38BDF8' : BLANK_BORDER_COLOR,
+                strokeWidth: isBlankBoxGuideHighlighted(guide.id)
+                  ? BLANK_BORDER_WIDTH_PX + 1
+                  : BLANK_BORDER_WIDTH_PX,
+                fill: '#FFFFFF',
+                shadowColor: isBlankBoxGuideHighlighted(guide.id) ? '#0EA5E9' : 'transparent',
+                shadowBlur: isBlankBoxGuideHighlighted(guide.id) ? 10 : 0,
+                shadowOpacity: isBlankBoxGuideHighlighted(guide.id) ? 0.45 : 0
+              }"
+            />
+            <v-text
+              v-if="getBlankBoxSuffixText(guide)"
+              :config="{
+                x: getBlankBoxSuffixPos(guide).x,
+                y: getBlankBoxSuffixPos(guide).y,
+                text: getBlankBoxSuffixText(guide),
+                fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
+                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+                fill: DEFAULT_TEXT_COLOR,
+                fontStyle: 'normal',
+                listening: false
               }"
             />
           </template>
@@ -3243,21 +3916,33 @@ defineExpose({ exportImage })
       <CanvasLatexOverlays
         :latex-text-guide-overlays="latexTextGuideOverlays"
         :latex-point-label-overlays="latexPointLabelOverlays"
+        :latex-shape-guide-overlays="latexShapeGuideOverlays"
         :zoom-scale="zoomScale"
         :viewport-offset="viewportOffset"
         :font-family="DEFAULT_TEXT_FONT_FAMILY"
         :is-text-guide-highlighted="isTextGuideHighlighted"
+        :is-text-guide-dragging="isTextGuideDragging"
+        :is-point-guide-dragging="isPointGuideDragging"
         :is-guide-text-highlighted="isGuideTextHighlighted"
+        :is-shape-guide-dragging="isShapeGuideDragging"
         @text-guide-mouse-enter="handleTextGuideMouseEnter"
         @text-guide-mouse-leave="handleTextGuideMouseLeave"
         @text-guide-mouse-down="handleTextGuideOverlayMouseDown"
+        @text-guide-mouse-up="handleLatexOverlayMouseUp"
         @text-guide-dbl-click="startTextGuideEdit"
         @text-guide-context-menu="handleTextGuideOverlayContextMenu"
         @point-guide-mouse-enter="(shapeId, pointIndex) => handleGuideTextMouseEnter(shapeId, 'pointName', pointIndex)"
         @point-guide-mouse-leave="handleGuideTextMouseLeave"
         @point-guide-mouse-down="handleLatexPointLabelMouseDown"
+        @point-guide-mouse-up="handleLatexOverlayMouseUp"
         @point-guide-dbl-click="handleLatexPointOverlayDblClick"
         @point-guide-context-menu="handleLatexPointOverlayContextMenu"
+        @shape-guide-mouse-enter="handleGuideTextMouseEnter"
+        @shape-guide-mouse-leave="handleGuideTextMouseLeave"
+        @shape-guide-mouse-down="handleLatexShapeGuideMouseDown"
+        @shape-guide-mouse-up="handleLatexOverlayMouseUp"
+        @shape-guide-dbl-click="handleLatexShapeGuideOverlayDblClick"
+        @shape-guide-context-menu="handleLatexShapeGuideOverlayContextMenu"
       />
     <CanvasTextEditPanels
       :zoom-scale="zoomScale"
@@ -3271,18 +3956,27 @@ defineExpose({ exportImage })
       :text-guide-edit-state="textGuideEditState"
       :text-guide-value="textGuideValue"
       :text-guide-use-latex="textGuideUseLatex"
+      :shape-guide-value-edit-state="shapeGuideValueEditState"
+      :shape-guide-value="shapeGuideValue"
+      :shape-guide-value-label="shapeGuideValueLabel"
+      :shape-guide-apply-to-geometry="shapeGuideApplyToGeometry"
       @update:text-input-value="textInputValue = $event"
       @update:text-input-use-latex="textInputUseLatex = $event"
       @update:point-label-value="pointLabelValue = $event"
       @update:point-label-use-latex="pointLabelUseLatex = $event"
       @update:text-guide-value="textGuideValue = $event"
       @update:text-guide-use-latex="textGuideUseLatex = $event"
+      @update:shape-guide-value="shapeGuideValue = $event"
+      @update:shape-guide-apply-to-geometry="shapeGuideApplyToGeometry = $event"
       @confirm-text-input="confirmTextInput"
       @cancel-text-input="cancelTextInput"
       @confirm-point-label-edit="confirmPointLabelEdit"
       @cancel-point-label-edit="cancelPointLabelEdit"
       @confirm-text-guide-edit="confirmTextGuideEdit"
       @cancel-text-guide-edit="cancelTextGuideEdit"
+      @confirm-shape-guide-value-edit="confirmShapeGuideValueEdit"
+      @cancel-shape-guide-value-edit="cancelShapeGuideValueEdit"
+      @reset-shape-guide-value-edit="resetShapeGuideValueEdit"
     />
   </div>
 </template>
