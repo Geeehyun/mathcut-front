@@ -5,6 +5,7 @@ import { useCanvasStore } from '@/stores/canvas'
 import GridCanvas from '@/components/canvas/GridCanvas.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import ContextMenu from '@/components/ContextMenu.vue'
+import AISketchModal from '@/components/AISketchModal.vue'
 import type { ShapeType, GuideType, Shape, Guide } from '@/types'
 import { GRID_CONFIG } from '@/types'
 import { isHeightDefaultVisibleType } from '@/constants/shapeRules'
@@ -37,6 +38,7 @@ const exportGrayscale = ref(false)
 const exportEmbedFonts = ref(true)
 const exportFileName = ref('mathcut')
 const exportModalOpen = ref(false)
+const aiSketchModalOpen = ref(false)
 const exportKeepAspect = ref(true)
 const exportAspectRatio = ref(exportWidth.value / exportHeight.value)
 
@@ -251,7 +253,7 @@ const shapeInstructions: Partial<Record<ShapeType, string>> = {
   'rect-square': '한 변의 두 점을 클릭하세요',
   'rect-rectangle': '대각선의 두 점을 클릭하세요',
   'rect-trapezoid': '밑변의 두 점을 찍고 세 번째 점으로 윗변을 정하세요',
-  'rect-rhombus': '네 점을 클릭하세요',
+  'rect-rhombus': '한 변의 두 점을 찍고 세 번째 점으로 기울기를 정하세요',
   'rect-parallelogram': '세 점을 클릭하세요',
   'rect-free': '네 개의 점을 클릭하세요',
   'polygon-regular': '중심과 꼭짓점을 클릭하면 정다각형이 생성됩니다',
@@ -417,7 +419,8 @@ const instruction = computed(() => {
   const instructions: Record<GuideType, string> = {
     length: '도형 변을 드래그해 생성하고, 생성된 곡선을 클릭해 방향을 바꿉니다',
     text: '배치할 위치를 클릭하세요',
-    angle: '도형의 꼭짓점을 클릭하면 해당 각도가 표시됩니다'
+    angle: '도형의 꼭짓점을 클릭하면 해당 각도가 표시됩니다',
+    'blank-box': 'AI 스케치에서 생성되는 외부 빈칸 박스입니다'
   }
   return instructions[toolStore.guideType]
 })
@@ -435,7 +438,8 @@ const currentTool = computed(() => {
   const names: Record<GuideType, string> = {
     length: '길이 표시',
     text: '텍스트',
-    angle: '각도'
+    angle: '각도',
+    'blank-box': '빈칸 박스'
   }
   return names[toolStore.guideType]
 })
@@ -443,7 +447,7 @@ const currentTool = computed(() => {
 const currentIcon = computed(() => {
   if (toolStore.mode === 'select') return '↖'
   if (toolStore.mode === 'shape') return shapeIcons[toolStore.shapeType] ?? '•'
-  const guideIcons: Record<GuideType, string> = { length: '📏', text: 'T', angle: '∠' }
+  const guideIcons: Record<GuideType, string> = { length: '📏', text: 'T', angle: '∠', 'blank-box': '⬚' }
   return guideIcons[toolStore.guideType]
 })
 
@@ -525,6 +529,7 @@ const groupedLayers = computed(() => {
       && shape.type !== 'rectangle'
       && shape.type !== 'rect-rectangle'
       && shape.type !== 'rect-square'
+      && shape.type !== 'rect-rhombus'
       && shape.points.length >= 3
     )
       ? [{
@@ -541,8 +546,8 @@ const groupedLayers = computed(() => {
       .filter(g => g.shapeId === shape.id)
       .map((guide, gIndex) => ({
         id: `guide-${guide.id}`,
-        icon: guide.type === 'length' ? '📏' : guide.type === 'text' ? 'A' : '∠',
-        label: `${guide.type === 'length' ? '길이 가이드' : guide.type === 'text' ? '텍스트 가이드' : '각도 가이드'} ${gIndex + 1}`,
+        icon: guide.type === 'length' ? '📏' : guide.type === 'text' ? 'A' : guide.type === 'blank-box' ? '⬚' : '∠',
+        label: `${guide.type === 'length' ? '길이 가이드' : guide.type === 'text' ? '텍스트 가이드' : guide.type === 'blank-box' ? '빈칸 박스' : '각도 가이드'} ${gIndex + 1}`,
         guideId: guide.id,
         visible: guide.visible !== false
       }))
@@ -579,8 +584,8 @@ const unboundGuides = computed(() => {
     .reverse()
     .map((guide, index) => ({
       id: `guide-${guide.id}`,
-      icon: guide.type === 'length' ? '📏' : guide.type === 'text' ? 'A' : '∠',
-      label: `${guide.type === 'length' ? '길이 가이드' : guide.type === 'text' ? '텍스트 가이드' : '각도 가이드'} ${index + 1}`,
+      icon: guide.type === 'length' ? '📏' : guide.type === 'text' ? 'A' : guide.type === 'blank-box' ? '⬚' : '∠',
+      label: `${guide.type === 'length' ? '길이 가이드' : guide.type === 'text' ? '텍스트 가이드' : guide.type === 'blank-box' ? '빈칸 박스' : '각도 가이드'} ${index + 1}`,
       guideId: guide.id,
       visible: guide.visible !== false
     }))
@@ -838,6 +843,13 @@ onUnmounted(() => {
 
       <div class="w-px h-5 bg-gray-700"></div>
 
+      <div class="flex items-center gap-1">
+        <button
+          class="text-xs bg-violet-600 hover:bg-violet-500 text-white px-3 py-1 rounded transition font-medium"
+          @click="aiSketchModalOpen = true"
+        >AI 스케치</button>
+      </div>
+
       <!-- ?대낫?닿린 -->
       <div class="flex items-center gap-1">
         <button
@@ -877,7 +889,7 @@ onUnmounted(() => {
       />
 
       <!-- ?곗륫 ?⑤꼸 而⑦뀒?대꼫 -->
-      <div class="absolute top-0 right-0 bottom-0 z-10 flex items-start justify-end pointer-events-none">
+      <div class="absolute top-0 right-0 bottom-0 left-0 z-10 flex items-start justify-end pointer-events-none">
 
         <!-- ?곗륫 ?⑤꼸 蹂몄껜 -->
         <div
@@ -1174,6 +1186,11 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <AISketchModal
+      v-if="aiSketchModalOpen"
+      @close="aiSketchModalOpen = false"
+    />
 
     <!-- ===== ?섎떒 ?곹깭 諛?(h-8) ===== -->
     <div class="shrink-0 h-8 bg-gray-900 border-t border-gray-800 flex items-center px-3 gap-3 z-30">
