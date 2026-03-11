@@ -61,8 +61,8 @@ export const useToolStore = defineStore('tool', () => {
   }
 
   // 모눈종이 표시 모드 변경
-  function setGridMode(mode: GridMode) {
-    gridMode.value = mode
+  function setGridMode(newMode: GridMode) {
+    gridMode.value = newMode
   }
 
   // 모눈종이 표시 모드 순환 (grid → dots → none → grid)

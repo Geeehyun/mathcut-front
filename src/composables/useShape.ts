@@ -17,7 +17,8 @@ import {
   computeRegularPolygon
 } from '@/utils/geometry'
 import type { Point, Shape } from '@/types'
-import { FILL_NONE, FILL_PALETTE, STROKE_PALETTE } from '@/constants/colorPalette'
+import { FILL_NONE, FILL_PALETTE, MAGENTA_100_HEX, STROKE_PALETTE } from '@/constants/colorPalette'
+import { HEIGHT_DEFAULT_VISIBLE_TYPES, OPEN_SHAPE_TYPES } from '@/constants/shapeRules'
 
 /**
  * 도형 그리기 관련 로직
@@ -26,16 +27,6 @@ export function useShape() {
   const canvasStore = useCanvasStore()
   const toolStore = useToolStore()
   let pendingAttachShapeId: string | null = null
-  const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'])
-  const defaultHeightVisibleTypes = new Set([
-    'triangle',
-    'triangle-equilateral',
-    'triangle-isosceles',
-    'triangle-free',
-    'rect-trapezoid',
-    'rect-rhombus',
-    'rect-parallelogram'
-  ])
 
   /**
    * 점 클릭 처리
@@ -75,6 +66,7 @@ export function useShape() {
       triangle: 3,
       circle: 2,
       polygon: -1, // 수동 완성
+      counter: 0,
       point: 1,
       'point-on-object': 1,
       segment: 2,
@@ -141,13 +133,13 @@ export function useShape() {
 
     const nextDefaultFillHex = (() => {
       const filledShapeCount = canvasStore.shapes.filter(
-        (shape) => !openShapeTypes.has(shape.type) && shape.type !== 'point' && shape.type !== 'point-on-object'
+        (shape) => !OPEN_SHAPE_TYPES.has(shape.type) && shape.type !== 'point' && shape.type !== 'point-on-object'
       ).length
       return FILL_PALETTE[filledShapeCount % FILL_PALETTE.length]?.hex || FILL_PALETTE[0]?.hex || FILL_NONE
     })()
-    const isOpenOrPoint = openShapeTypes.has(normalizedType) || normalizedType === 'point' || normalizedType === 'point-on-object'
+    const isOpenOrPoint = OPEN_SHAPE_TYPES.has(normalizedType) || normalizedType === 'point' || normalizedType === 'point-on-object'
 
-    const arrowDefaultStroke = STROKE_PALETTE.find((c) => c.id === 'magenta100')?.hex || '#E6007E'
+    const arrowDefaultStroke = MAGENTA_100_HEX
     const isArrowType = normalizedType === 'arrow' || normalizedType === 'arrow-curve'
 
     const shape: Shape = {
@@ -162,7 +154,7 @@ export function useShape() {
       strokeWidthPt: isArrowType ? 0.5 : undefined,
       guideVisibility: {
         length: normalizedType === 'ray' || normalizedType === 'line' ? false : undefined,
-        height: defaultHeightVisibleTypes.has(normalizedType),
+        height: HEIGHT_DEFAULT_VISIBLE_TYPES.has(normalizedType),
         point: isArrowType ? false : undefined
       },
       attachedToShapeId: shapeType === 'point-on-object' ? pendingAttachShapeId ?? undefined : undefined

@@ -7,7 +7,8 @@ import InfoPanel from '@/components/InfoPanel.vue'
 import ContextMenu from '@/components/ContextMenu.vue'
 import type { ShapeType, GuideType, Shape, Guide } from '@/types'
 import { GRID_CONFIG } from '@/types'
-import { findRightAngles } from '@/utils/geometry'
+import { isHeightDefaultVisibleType } from '@/constants/shapeRules'
+import { getShapeAutoAngleIndices } from '@/utils/shapeGuideLayout'
 
 const toolStore = useToolStore()
 const canvasStore = useCanvasStore()
@@ -33,7 +34,7 @@ const exportWidth = ref(EXPORT_DEFAULT_WIDTH)
 const exportHeight = ref(EXPORT_DEFAULT_HEIGHT)
 const exportIncludeBackground = ref(true)
 const exportGrayscale = ref(false)
-const exportEmbedFonts = ref(false)
+const exportEmbedFonts = ref(true)
 const exportFileName = ref('mathcut')
 const exportModalOpen = ref(false)
 const exportKeepAspect = ref(true)
@@ -373,27 +374,11 @@ function getAngleLabel(shape: Shape, vertexIndex: number): string {
 }
 
 function isShapeHeightDefaultVisible(shape: Shape): boolean {
-  return shape.type === 'triangle'
-    || shape.type === 'triangle-free'
-    || shape.type === 'triangle-equilateral'
-    || shape.type === 'triangle-isosceles'
-    || shape.type === 'rect-trapezoid'
-    || shape.type === 'rect-rhombus'
-    || shape.type === 'rect-parallelogram'
+  return isHeightDefaultVisibleType(shape.type)
 }
 
 function getShapeAngleIndices(shape: Shape): number[] {
-  if (shape.type === 'angle-line') {
-    return shape.points.length >= 3 ? [1] : []
-  }
-  const isOpenShape = shape.type === 'segment'
-    || shape.type === 'ray'
-    || shape.type === 'line'
-    || shape.type === 'arrow'
-    || shape.type === 'arrow-curve'
-  if (shape.type === 'circle' || isOpenShape || shape.points.length < 3) return []
-  if (toolStore.angleDisplayMode === 'all') return shape.points.map((_, index) => index)
-  return findRightAngles(shape.points)
+  return getShapeAutoAngleIndices(shape, toolStore.angleDisplayMode)
 }
 
 function isShapeGuideItemVisibleInLayer(

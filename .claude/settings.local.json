@@ -15,7 +15,10 @@
       "Bash(node -e:*)",
       "Bash(npm run build:*)",
       "Bash(find \"D:\\\\vision\\\\mathcut-front\\\\src\" -name \"*.ts\" -o -name \"*.vue\" | xargs grep -l \"getRightAngleMarkerPoints\\\\|isRightAngleByThreePoints\" | head -10)",
-      "Bash(grep -r \"getRightAngleMarkerPoints\\\\|isRightAngleByThreePoints\" \"D:/vision/mathcut-front/src\" --include=\"*.ts\" --include=\"*.vue\" 2>/dev/null | head -20)"
+      "Bash(grep -r \"getRightAngleMarkerPoints\\\\|isRightAngleByThreePoints\" \"D:/vision/mathcut-front/src\" --include=\"*.ts\" --include=\"*.vue\" 2>/dev/null | head -20)",
+      "Bash(mkdir -p \"D:/vision/mathcut-front/docs/refactor\" && git -C \"D:/vision/mathcut-front\" mv CODE_REVIEW.md docs/refactor/CODE_REVIEW.md && git -C \"D:/vision/mathcut-front\" mv REFACTOR_PLAN.md docs/refactor/REFACTOR_PLAN.md && git -C \"D:/vision/mathcut-front\" mv REFACTOR_FINAL.md docs/refactor/REFACTOR_FINAL.md && echo \"Done\")",
+      "Bash(cd \"D:/vision/mathcut-front\" && mv CODE_REVIEW.md docs/refactor/CODE_REVIEW.md && mv REFACTOR_PLAN.md docs/refactor/REFACTOR_PLAN.md && mv REFACTOR_FINAL.md docs/refactor/REFACTOR_FINAL.md && ls docs/refactor/)",
+      "Bash(cd \"D:/vision/mathcut-front\" && awk 'NR>=4638 && NR<=4643' src/components/canvas/GridCanvas.vue)"
     ]
   }
 }

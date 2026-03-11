@@ -377,3 +377,12 @@
 - [ ] 프롬프트 입력 UI
 - [ ] AI 생성 이미지 → 캔버스 변환
 - [ ] 생성된 도형 편집 기능
+# -*- appended by Codex on 2026-03-11 -*-
+
+### 2026-03-11
+
+#### [Codex] refactor Phase 4-1 완료 (`useCanvasExport`로 SVG export 완전 이동)
+- `src/composables/useCanvasExport.ts`: `generateVectorSVG()`와 SVG helper, font embed fetch, defs 생성, export orchestration 통합
+- `src/components/canvas/GridCanvas.vue`: export 경계에서 SVG 계산 callback/상수만 `svg` 옵션으로 전달하도록 정리
+- `docs/refactor/REFACTOR_RESULT.md`: Phase 4-1 완료 상태 및 후속 범위 갱신
+- `npm run build` 통과

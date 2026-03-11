@@ -1,9 +1,27 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Shape, Guide, ShapeColor, ShapeGuideVisibility } from '@/types'
+import type { Shape, Guide, ShapeColor, ShapeGuideVisibility, ShapeGuideItemStyle } from '@/types'
 import { GRID_CONFIG } from '@/types'
 
 type CanvasSnapshot = { shapes: Shape[], guides: Guide[] }
+const HISTORY_LIMIT = 100
+
+function withCircleOppositePoint(shape: Shape): Shape {
+  if (shape.type !== 'circle') return shape
+  if (shape.points.length < 2) return shape
+  const center = shape.points[0]
+  const edge = shape.points[1]
+  const opposite = {
+    x: center.x * 2 - edge.x,
+    y: center.y * 2 - edge.y,
+    gridX: (center.x * 2 - edge.x) / GRID_CONFIG.size,
+    gridY: (center.y * 2 - edge.y) / GRID_CONFIG.size
+  }
+  return {
+    ...shape,
+    points: [center, edge, opposite]
+  }
+}
 
 export const useCanvasStore = defineStore('canvas', () => {
   // 도형 목록
@@ -37,6 +55,9 @@ export const useCanvasStore = defineStore('canvas', () => {
       shapes: JSON.parse(JSON.stringify(shapes.value)),
       guides: JSON.parse(JSON.stringify(guides.value))
     })
+    if (history.value.length > HISTORY_LIMIT) {
+      history.value = history.value.slice(history.value.length - HISTORY_LIMIT)
+    }
     historyIndex.value = history.value.length - 1
   }
 
@@ -262,7 +283,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     id: string,
     key: 'length' | 'angle' | 'pointName' | 'height',
     itemIndex: number,
-    patch: { color?: string, fontSize?: number, lineWidth?: number, offsetX?: number, offsetY?: number, curveSide?: 1 | -1 },
+    patch: Partial<ShapeGuideItemStyle>,
     recordHistory: boolean = true
   ) {
     const shapeIndex = shapes.value.findIndex(s => s.id === id)
@@ -370,6 +391,8 @@ export const useCanvasStore = defineStore('canvas', () => {
     guides.value = JSON.parse(JSON.stringify(snapshot.guides))
     selectedShapeId.value = null
     selectedGuideId.value = null
+    history.value = []
+    historyIndex.value = -1
   }
 
   // 실행취소
@@ -434,19 +457,3 @@ export const useCanvasStore = defineStore('canvas', () => {
     redo
   }
 })
-  function withCircleOppositePoint(shape: Shape): Shape {
-    if (shape.type !== 'circle') return shape
-    if (shape.points.length < 2) return shape
-    const center = shape.points[0]
-    const edge = shape.points[1]
-    const opposite = {
-      x: center.x * 2 - edge.x,
-      y: center.y * 2 - edge.y,
-      gridX: (center.x * 2 - edge.x) / GRID_CONFIG.size,
-      gridY: (center.y * 2 - edge.y) / GRID_CONFIG.size
-    }
-    return {
-      ...shape,
-      points: [center, edge, opposite]
-    }
-  }

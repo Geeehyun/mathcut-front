@@ -22,6 +22,8 @@ export const STROKE_PALETTE: PaletteColor[] = [
 ]
 
 /** 채우기(fill) 팔레트 — 파스텔 계열, 텍스트 가독성 유지 */
+export const MAGENTA_100_HEX = STROKE_PALETTE.find((color) => color.id === 'magenta100')?.hex ?? '#E6007E'
+
 export const FILL_PALETTE: PaletteColor[] = [
     { "id": "fill-cyan-20", "name": "파스텔 청록(C20)", "hex": "#CFEAF7", "cmyk": [20, 0, 0, 0] },
     { "id": "fill-sky", "name": "파스텔 하늘(C25 M5)", "hex": "#C3E6F8", "cmyk": [25, 5, 0, 0] },

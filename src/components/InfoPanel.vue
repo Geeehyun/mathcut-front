@@ -5,6 +5,7 @@ import { useToolStore } from '@/stores/tool'
 import { GRID_CONFIG, STYLE_COLORS, type Guide, type Point, type Shape } from '@/types'
 import { generateId, calculateDistance } from '@/utils/geometry'
 import { FILL_NONE, FILL_PALETTE, STROKE_PALETTE, cmykTooltip } from '@/constants/colorPalette'
+import { OPEN_SHAPE_TYPES, isHeightDefaultVisibleType } from '@/constants/shapeRules'
 
 const canvasStore = useCanvasStore()
 const toolStore = useToolStore()
@@ -66,8 +67,6 @@ const isLineSelection = computed(() => {
   return type === 'segment' || type === 'ray' || type === 'line'
 })
 const isAngleLineSelection = computed(() => selectedShape.value?.type === 'angle-line')
-const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'])
-
 type GuideToggleKey = 'length' | 'radius' | 'angle' | 'pointName' | 'point' | 'height'
 type GlobalGuideState = 'all' | 'none' | 'mixed'
 
@@ -129,7 +128,7 @@ const selectedGridLineColor = computed(() => toolStore.gridLineColor)
 const selectedGridBackgroundColor = computed(() => toolStore.gridBackgroundColor)
 
 function getDefaultStrokeWidthPt(shape: Shape): number {
-  const isFilled = !openShapeTypes.has(shape.type) && shape.color?.fill !== FILL_NONE
+  const isFilled = !OPEN_SHAPE_TYPES.has(shape.type) && shape.color?.fill !== FILL_NONE
   return isFilled ? DEFAULT_FILLED_STROKE_PT : DEFAULT_UNFILLED_STROKE_PT
 }
 
@@ -153,7 +152,7 @@ const isHeightBaseConfigurable = computed(() => {
     && selectedShape.value.type !== 'rectangle'
     && selectedShape.value.type !== 'rect-rectangle'
     && selectedShape.value.type !== 'rect-square'
-    && !openShapeTypes.has(selectedShape.value.type)
+    && !OPEN_SHAPE_TYPES.has(selectedShape.value.type)
     && selectedShape.value.points.length >= 3
 })
 
@@ -188,13 +187,7 @@ const selectedHeightBaseLabel = computed(() => {
 })
 
 function isShapeHeightDefaultVisible(shape: Shape): boolean {
-  return shape.type === 'triangle'
-    || shape.type === 'triangle-free'
-    || shape.type === 'triangle-equilateral'
-    || shape.type === 'triangle-isosceles'
-    || shape.type === 'rect-trapezoid'
-    || shape.type === 'rect-rhombus'
-    || shape.type === 'rect-parallelogram'
+  return isHeightDefaultVisibleType(shape.type)
 }
 
 function isShapePointDefaultVisible(shape: Shape): boolean {
@@ -218,10 +211,10 @@ function isShapeGuideAvailable(shape: Shape | null, key: GuideToggleKey): boolea
   if (key === 'point') return true
   if (key === 'angle') {
     if (shape.type === 'angle-line') return shape.points.length >= 3
-    return shape.type !== 'circle' && !openShapeTypes.has(shape.type) && shape.points.length >= 3
+    return shape.type !== 'circle' && !OPEN_SHAPE_TYPES.has(shape.type) && shape.points.length >= 3
   }
   if (key === 'height') {
-    if (shape.type === 'circle' || openShapeTypes.has(shape.type)) return false
+    if (shape.type === 'circle' || OPEN_SHAPE_TYPES.has(shape.type)) return false
     if (shape.type === 'triangle-right') return false
     if (shape.type === 'rectangle' || shape.type === 'rect-rectangle' || shape.type === 'rect-square') return false
     return shape.points.length >= 3
@@ -352,7 +345,7 @@ const selectedMetrics = computed(() => {
       area: Math.PI * r * r
     }
   }
-  if (openShapeTypes.has(shape.type) || shape.points.length < 3) {
+  if (OPEN_SHAPE_TYPES.has(shape.type) || shape.points.length < 3) {
     return { perimeter: null, area: null }
   }
   return {

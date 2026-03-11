@@ -43,6 +43,24 @@ export function calculateDistance(p1: Point, p2: Point): number {
   return Math.sqrt(dx * dx + dy * dy) / GRID_CONFIG.size
 }
 
+export function computeAngleDegrees(prev: Point, vertex: Point, next: Point): number {
+  const v1x = prev.x - vertex.x
+  const v1y = prev.y - vertex.y
+  const v2x = next.x - vertex.x
+  const v2y = next.y - vertex.y
+  const m1 = Math.hypot(v1x, v1y)
+  const m2 = Math.hypot(v2x, v2y)
+  if (m1 <= 1e-6 || m2 <= 1e-6) return 0
+  const dot = v1x * v2x + v1y * v2y
+  const cos = Math.max(-1, Math.min(1, dot / (m1 * m2)))
+  return (Math.acos(cos) * 180) / Math.PI
+}
+
+export function formatAngleDegrees(degrees: number): string {
+  if (Math.abs(degrees - 90) < 0.05) return '90°'
+  return `${degrees.toFixed(1)}°`
+}
+
 /**
  * 두 점 사이 거리 계산 (픽셀)
  */

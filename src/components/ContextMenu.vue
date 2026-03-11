@@ -5,6 +5,7 @@ import { useToolStore } from '@/stores/tool'
 import { GRID_CONFIG, STYLE_COLORS, type Point } from '@/types'
 import { FILL_NONE, FILL_PALETTE, STROKE_PALETTE, cmykTooltip } from '@/constants/colorPalette'
 import { generateId } from '@/utils/geometry'
+import { OPEN_SHAPE_TYPES, isHeightDefaultVisibleType } from '@/constants/shapeRules'
 
 const props = defineProps<{
   x: number
@@ -237,7 +238,7 @@ const selectedPoint = computed(() => {
 
 function getDefaultStrokeWidthPt(): number {
   if (!targetShape.value) return DEFAULT_UNFILLED_STROKE_PT
-  const isOpen = ['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'].includes(targetShape.value.type)
+  const isOpen = OPEN_SHAPE_TYPES.has(targetShape.value.type)
   const isFilled = !isOpen && targetShape.value.color?.fill !== FILL_NONE
   return isFilled ? DEFAULT_FILLED_STROKE_PT : DEFAULT_UNFILLED_STROKE_PT
 }
@@ -271,15 +272,7 @@ const shapeGuideVisibility = computed(() => ({
     ),
   height: typeof targetShape.value?.guideVisibility?.height === 'boolean'
     ? targetShape.value?.guideVisibility?.height === true
-    : (
-      targetShape.value?.type === 'triangle'
-      || targetShape.value?.type === 'triangle-free'
-      || targetShape.value?.type === 'triangle-equilateral'
-      || targetShape.value?.type === 'triangle-isosceles'
-      || targetShape.value?.type === 'rect-trapezoid'
-      || targetShape.value?.type === 'rect-rhombus'
-      || targetShape.value?.type === 'rect-parallelogram'
-    )
+    : !!(targetShape.value && isHeightDefaultVisibleType(targetShape.value.type))
 }))
 
 const isHeightGuideToggleVisible = computed(() => {
@@ -290,11 +283,9 @@ const isHeightGuideToggleVisible = computed(() => {
     && targetShape.value.type !== 'rectangle'
     && targetShape.value.type !== 'rect-rectangle'
     && targetShape.value.type !== 'rect-square'
-    && !openShapeTypes.has(targetShape.value.type)
+    && !OPEN_SHAPE_TYPES.has(targetShape.value.type)
     && targetShape.value.points.length >= 3
 })
-
-const openShapeTypes = new Set(['segment', 'ray', 'line', 'angle-line', 'arrow', 'arrow-curve'])
 
 const isHeightBaseConfigurable = computed(() => {
   if (!targetShape.value) return false
@@ -303,7 +294,7 @@ const isHeightBaseConfigurable = computed(() => {
     && targetShape.value.type !== 'rectangle'
     && targetShape.value.type !== 'rect-rectangle'
     && targetShape.value.type !== 'rect-square'
-    && !openShapeTypes.has(targetShape.value.type)
+    && !OPEN_SHAPE_TYPES.has(targetShape.value.type)
     && targetShape.value.points.length >= 3
 })
 

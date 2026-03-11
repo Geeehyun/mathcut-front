@@ -4,13 +4,17 @@ import { computed, ref } from 'vue'
 import {
   generateId,
   calculateDistance,
+  computeAngleDegrees,
   distanceBetweenPoints,
   distancePointToSegment,
+  formatAngleDegrees,
   getLengthGuideControlPoint,
   createQuadraticCurvePoints,
   distancePointToPolyline
 } from '@/utils/geometry'
+import { GRID_CONFIG } from '@/types'
 import type { Point, Guide } from '@/types'
+import { GUIDE_HIT_THRESHOLD_PX } from '@/constants/shapeRules'
 
 /**
  * 가이드 관련 로직
@@ -18,7 +22,7 @@ import type { Point, Guide } from '@/types'
 export function useGuide() {
   const canvasStore = useCanvasStore()
   const toolStore = useToolStore()
-  const selectionThreshold = 14
+  const selectionThreshold = GUIDE_HIT_THRESHOLD_PX
 
   const pendingLengthEdge = ref<{ p1: Point, p2: Point, shapeId: string } | null>(null)
   const lengthDragPoint = ref<{ x: number, y: number } | null>(null)
@@ -133,34 +137,7 @@ export function useGuide() {
    */
   function calculateAngle(points: Point[]): string {
     if (points.length < 3) return '0°'
-
-    const p1 = points[0]
-    const vertex = points[1]
-    const p2 = points[2]
-
-    // 벡터 계산
-    const v1x = p1.x - vertex.x
-    const v1y = p1.y - vertex.y
-    const v2x = p2.x - vertex.x
-    const v2y = p2.y - vertex.y
-
-    // 내적으로 직각 확인
-    const dotProduct = v1x * v2x + v1y * v2y
-    if (Math.abs(dotProduct) < 1) {
-      return '90°'
-    }
-
-    // 각도 계산
-    const angle1 = Math.atan2(v1y, v1x)
-    const angle2 = Math.atan2(v2y, v2x)
-    let angleDiff = Math.abs(angle2 - angle1)
-
-    if (angleDiff > Math.PI) {
-      angleDiff = 2 * Math.PI - angleDiff
-    }
-
-    const angleDegrees = (angleDiff * 180 / Math.PI).toFixed(1)
-    return `${angleDegrees}°`
+    return formatAngleDegrees(computeAngleDegrees(points[0], points[1], points[2]))
   }
 
   /**
@@ -184,8 +161,8 @@ export function useGuide() {
     return {
       x: rawPoint.x,
       y: rawPoint.y,
-      gridX: Math.round(rawPoint.x),
-      gridY: Math.round(rawPoint.y)
+      gridX: rawPoint.x / GRID_CONFIG.size,
+      gridY: rawPoint.y / GRID_CONFIG.size
     }
   }
 
