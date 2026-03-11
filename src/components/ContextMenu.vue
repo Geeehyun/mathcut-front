@@ -38,6 +38,8 @@ const GUIDE_LINE_WIDTH_STEP = 0.1
 const GUIDE_LINE_WIDTH_MIN = 0.1
 const GUIDE_LINE_WIDTH_MAX = 12
 const GUIDE_LINE_WIDTH_DEFAULT = 0.4
+const MM_TO_PX = 96 / 25.4
+const BLANK_BASE_HEIGHT_MM = 7
 const BLANK_WIDTH_STEP_MM = 0.5
 const BLANK_WIDTH_MIN_MM = 3
 const BLANK_WIDTH_MAX_MM = 50
@@ -181,6 +183,8 @@ const targetGuideLabel = computed(() => {
       ? '길이 가이드'
       : targetGuide.value.type === 'text'
         ? '텍스트 가이드'
+        : targetGuide.value.type === 'blank-box'
+          ? '빈칸 박스'
         : '각도 가이드'
   }
   if (props.target?.kind === 'shape-guide-item') {
@@ -283,6 +287,7 @@ const isHeightGuideToggleVisible = computed(() => {
     && targetShape.value.type !== 'rectangle'
     && targetShape.value.type !== 'rect-rectangle'
     && targetShape.value.type !== 'rect-square'
+    && targetShape.value.type !== 'rect-rhombus'
     && !OPEN_SHAPE_TYPES.has(targetShape.value.type)
     && targetShape.value.points.length >= 3
 })
@@ -294,6 +299,7 @@ const isHeightBaseConfigurable = computed(() => {
     && targetShape.value.type !== 'rectangle'
     && targetShape.value.type !== 'rect-rectangle'
     && targetShape.value.type !== 'rect-square'
+    && targetShape.value.type !== 'rect-rhombus'
     && !OPEN_SHAPE_TYPES.has(targetShape.value.type)
     && targetShape.value.points.length >= 3
 })
@@ -455,6 +461,63 @@ function setGuideLineWidth(lineWidth: number) {
   canvasStore.updateGuide(targetGuide.value.id, (guide) => ({ ...guide, lineWidth: clamped }))
 }
 
+function getGuideBlankWidthMm(): number {
+  if (!targetGuide.value || targetGuide.value.type !== 'blank-box') return BLANK_WIDTH_DEFAULT_MM
+  const raw = Number(targetGuide.value.blankWidthMm)
+  if (Number.isFinite(raw)) {
+    const stepped = Math.round(raw / BLANK_WIDTH_STEP_MM) * BLANK_WIDTH_STEP_MM
+    return Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, stepped))
+  }
+  const widthPx = Math.abs((targetGuide.value.points[1]?.x || 0) - (targetGuide.value.points[0]?.x || 0))
+  const widthMm = widthPx / MM_TO_PX
+  const stepped = Math.round(widthMm / BLANK_WIDTH_STEP_MM) * BLANK_WIDTH_STEP_MM
+  return Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, stepped || BLANK_WIDTH_DEFAULT_MM))
+}
+
+function setGuideBlankWidthMm(widthMm: number) {
+  if (!targetGuide.value || targetGuide.value.type !== 'blank-box' || targetGuide.value.points.length < 2) return
+  const clampedMm = Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, Number(widthMm.toFixed(1))))
+  const widthPx = clampedMm * MM_TO_PX
+  const heightPx = BLANK_BASE_HEIGHT_MM * MM_TO_PX
+  const p1 = targetGuide.value.points[0]
+  const p2 = targetGuide.value.points[1]
+  const centerX = (p1.x + p2.x) / 2
+  const centerY = (p1.y + p2.y) / 2
+  canvasStore.updateGuide(targetGuide.value.id, (guide) => ({
+    ...guide,
+    blankWidthMm: clampedMm,
+    points: [
+      {
+        x: centerX - widthPx / 2,
+        y: centerY - heightPx / 2,
+        gridX: (centerX - widthPx / 2) / GRID_CONFIG.size,
+        gridY: (centerY - heightPx / 2) / GRID_CONFIG.size
+      },
+      {
+        x: centerX + widthPx / 2,
+        y: centerY + heightPx / 2,
+        gridX: (centerX + widthPx / 2) / GRID_CONFIG.size,
+        gridY: (centerY + heightPx / 2) / GRID_CONFIG.size
+      }
+    ]
+  }))
+}
+
+function getGuideBlankUnitMode(): 'none' | 'cm' | 'angle' {
+  if (!targetGuide.value || targetGuide.value.type !== 'blank-box') return 'none'
+  return targetGuide.value.blankUnitMode === 'cm' || targetGuide.value.blankUnitMode === 'angle'
+    ? targetGuide.value.blankUnitMode
+    : 'none'
+}
+
+function setGuideBlankUnitMode(mode: 'none' | 'cm' | 'angle') {
+  if (!targetGuide.value || targetGuide.value.type !== 'blank-box') return
+  canvasStore.updateGuide(targetGuide.value.id, (guide) => ({
+    ...guide,
+    blankUnitMode: mode
+  }))
+}
+
 function removeGuide() {
   if (!targetGuide.value) return
   canvasStore.removeGuide(targetGuide.value.id)
@@ -520,6 +583,13 @@ const shapeGuideItemTypeLabel = computed(() => {
   if (shapeGuideItemKey.value === 'angle') return '각도'
   if (shapeGuideItemKey.value === 'pointName') return '점 이름'
   if (shapeGuideItemKey.value === 'height') return '높이'
+  return ''
+})
+const guideItemTypeLabel = computed(() => {
+  if (targetGuide.value?.type === 'blank-box') return '빈칸'
+  if (targetGuide.value?.type === 'text') return '텍스트'
+  if (targetGuide.value?.type === 'length') return '길이'
+  if (targetGuide.value?.type === 'angle') return '각도'
   return ''
 })
 
@@ -811,17 +881,34 @@ onUnmounted(() => {
       </template>
 
       <template v-else-if="isGuideTarget">
-        <div class="px-2.5 py-1 text-xs text-gray-500">가이드 <span class="font-medium text-gray-700">{{ targetGuideLabel }}</span></div>
+        <div class="px-2.5 py-1 text-xs text-gray-500">{{ targetGuide?.type === 'blank-box' ? '항목' : '가이드' }} <span class="font-medium text-gray-700">{{ targetGuideLabel }}</span></div>
         <div class="menu-sep"></div>
 
         <div class="px-2 py-2 space-y-2">
+          <p v-if="targetGuide?.type === 'blank-box' && guideItemTypeLabel" class="text-[11px] text-gray-500">타입: {{ guideItemTypeLabel }}</p>
           <div>
             <p class="text-xs text-gray-500 mb-1">색상</p>
             <div class="flex items-center flex-wrap gap-1.5">
               <button v-for="color in STROKE_PALETTE" :key="`guide-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setGuideColor(color.hex)"></button>
             </div>
           </div>
-          <div>
+          <div v-if="targetGuide?.type === 'blank-box'">
+            <p class="text-xs text-gray-500 mb-1">빈칸 폭 (mm)</p>
+            <div class="flex items-center gap-1">
+              <button class="px-2 py-0.5 border rounded" @click="setGuideBlankWidthMm(Math.max(BLANK_WIDTH_MIN_MM, getGuideBlankWidthMm() - BLANK_WIDTH_STEP_MM))">-</button>
+              <span class="text-xs w-12 text-center">{{ getGuideBlankWidthMm().toFixed(1) }}</span>
+              <button class="px-2 py-0.5 border rounded" @click="setGuideBlankWidthMm(Math.min(BLANK_WIDTH_MAX_MM, getGuideBlankWidthMm() + BLANK_WIDTH_STEP_MM))">+</button>
+            </div>
+          </div>
+          <div v-if="targetGuide?.type === 'blank-box'">
+            <p class="text-xs text-gray-500 mb-1">단위 표시</p>
+            <div class="grid grid-cols-3 gap-1">
+              <button class="px-2 py-0.5 border rounded text-xs" :class="getGuideBlankUnitMode() === 'none' ? 'bg-blue-50 border-blue-400 text-blue-700' : ''" @click="setGuideBlankUnitMode('none')">공란</button>
+              <button class="px-2 py-0.5 border rounded text-xs" :class="getGuideBlankUnitMode() === 'cm' ? 'bg-blue-50 border-blue-400 text-blue-700' : ''" @click="setGuideBlankUnitMode('cm')">cm</button>
+              <button class="px-2 py-0.5 border rounded text-xs" :class="getGuideBlankUnitMode() === 'angle' ? 'bg-blue-50 border-blue-400 text-blue-700' : ''" @click="setGuideBlankUnitMode('angle')">각도기호</button>
+            </div>
+          </div>
+          <div v-if="targetGuide?.type === 'text'">
             <p class="text-xs text-gray-500 mb-1">글자 크기</p>
             <div class="flex items-center gap-1">
               <button class="px-2 py-0.5 border rounded" @click="guideFontSizeDraft = Math.max(8, guideFontSizeDraft - 1); setGuideFontSize(guideFontSizeDraft)">-</button>

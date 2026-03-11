@@ -30,7 +30,7 @@ export type ShapeType =
   | 'counter'
 
 export type StyleType = 'default' | 'pastel' | 'blackwhite'
-export type GuideType = 'length' | 'text' | 'angle'
+export type GuideType = 'length' | 'text' | 'angle' | 'blank-box'
 
 export interface ShapeColor {
   stroke: string
@@ -56,6 +56,8 @@ export interface ShapeGuideItemStyle {
   textColor?: string
   lineColor?: string
   curveSide?: 1 | -1
+  customText?: string
+  detached?: boolean
   heightLineColor?: string
   heightLineWidth?: number
   measureLineColor?: string
@@ -105,6 +107,8 @@ export interface Guide {
   fontSize?: number
   lineWidth?: number
   rotation?: number
+  blankWidthMm?: number
+  blankUnitMode?: 'none' | 'cm' | 'angle'
 }
 
 export type ModeType = 'shape' | 'guide' | 'select'

@@ -7,6 +7,7 @@ import {
   computeAngleDegrees,
   distanceBetweenPoints,
   distancePointToSegment,
+  formatRoundedValue,
   formatAngleDegrees,
   getLengthGuideControlPoint,
   createQuadraticCurvePoints,
@@ -49,6 +50,11 @@ export function useGuide() {
 
     if (toolStore.guideType === 'angle') {
       completeAngleGuide(rawPoint)
+      return
+    }
+
+    if (toolStore.guideType === 'blank-box') {
+      completeBlankBoxGuide(point)
     }
   }
 
@@ -89,7 +95,7 @@ export function useGuide() {
       type: 'length',
       // [시작점, 끝점, 굽힘 방향 기준점]
       points: [p1, p2, rawToPoint(rawPoint)],
-      text: distance.toFixed(1),
+      text: formatRoundedValue(distance),
       shapeId
     }
 
@@ -109,6 +115,27 @@ export function useGuide() {
       text: customText || 'A',
       useLatex,
       color: '#231815'
+    }
+    canvasStore.addGuide(guide)
+  }
+
+  /**
+   * 빈칸 박스 가이드 생성 (클릭 위치 중심으로 기본 크기 배치)
+   */
+  function completeBlankBoxGuide(point: Point) {
+    const halfW = GRID_CONFIG.size * 1.4  // 2.8 그리드 / 2
+    const halfH = GRID_CONFIG.size * 0.7  // 1.4 그리드 / 2
+    const guide: Guide = {
+      id: generateId(),
+      type: 'blank-box',
+      points: [
+        { x: point.x - halfW, y: point.y - halfH, gridX: (point.x - halfW) / GRID_CONFIG.size, gridY: (point.y - halfH) / GRID_CONFIG.size },
+        { x: point.x + halfW, y: point.y + halfH, gridX: (point.x + halfW) / GRID_CONFIG.size, gridY: (point.y + halfH) / GRID_CONFIG.size },
+      ],
+      color: '#231815',
+      lineWidth: 1,
+      blankWidthMm: 7,
+      blankUnitMode: 'none',
     }
     canvasStore.addGuide(guide)
   }

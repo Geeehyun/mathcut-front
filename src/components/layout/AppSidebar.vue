@@ -338,7 +338,7 @@ const gridModeMeta = computed(() => {
           <span class="text-lg">▲</span><span class="text-xs">이등변삼각형</span>
         </button>
         <button class="sub-btn" :class="isShapeActive('triangle') ? 'sub-btn-active' : 'sub-btn-default'" @click="selectShape('triangle')">
-          <span class="text-lg">△</span><span class="text-xs">자유로운 삼각형</span>
+          <span class="text-lg">△</span><span class="text-xs">자유로운<br>삼각형</span>
         </button>
       </div>
     </div>
@@ -369,7 +369,7 @@ const gridModeMeta = computed(() => {
           <span class="text-lg">▱</span><span class="text-xs">평행사변형</span>
         </button>
         <button class="sub-btn" :class="isShapeActive('rect-free') ? 'sub-btn-active' : 'sub-btn-default'" @click="selectShape('rect-free')">
-          <span class="text-lg">⬜</span><span class="text-xs">자유로운 사각형</span>
+          <span class="text-lg">⬜</span><span class="text-xs">자유로운<br>사각형</span>
         </button>
       </div>
     </div>
@@ -442,6 +442,9 @@ const gridModeMeta = computed(() => {
         </button>
         <button class="sub-btn" :class="isShapeActive('arrow-curve') ? 'sub-btn-active' : 'sub-btn-default'" @click="selectShape('arrow-curve')">
           <span class="text-lg">⤳</span><span class="text-xs">화살표(곡선)</span>
+        </button>
+        <button class="sub-btn" :class="isGuideActive('blank-box') ? 'sub-btn-guide-active' : 'sub-btn-default'" @click="selectGuide('blank-box')">
+          <span class="text-lg">⬚</span><span class="text-xs">빈칸</span>
         </button>
         <!-- <button class="sub-btn sub-btn-disabled col-span-2" disabled>
           <span class="text-lg">123</span><span class="text-xs">수 모형</span>

@@ -56,9 +56,17 @@ export function computeAngleDegrees(prev: Point, vertex: Point, next: Point): nu
   return (Math.acos(cos) * 180) / Math.PI
 }
 
+export function formatRoundedValue(value: number): string {
+  const rounded = Math.round(value * 10) / 10
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) {
+    return String(Math.round(rounded))
+  }
+  return rounded.toFixed(1)
+}
+
 export function formatAngleDegrees(degrees: number): string {
   if (Math.abs(degrees - 90) < 0.05) return '90°'
-  return `${degrees.toFixed(1)}°`
+  return `${formatRoundedValue(degrees)}°`
 }
 
 /**
@@ -376,11 +384,14 @@ export function computeRightTriangleThirdPoint(p1: Point, p2: Point, hint: Point
   const ny = bx / len
 
   // 힌트점을 p2 기준 수직축으로 투영 -> 높이 결정
-  const hx = hint.x - p2.x
-  const hy = hint.y - p2.y
+  const d1 = Math.hypot(hint.x - p1.x, hint.y - p1.y)
+  const d2 = Math.hypot(hint.x - p2.x, hint.y - p2.y)
+  const rightVertex = d1 < d2 ? p1 : p2
+  const hx = hint.x - rightVertex.x
+  const hy = hint.y - rightVertex.y
   const h = hx * nx + hy * ny
 
-  return makePoint(p2.x + nx * h, p2.y + ny * h)
+  return makePoint(rightVertex.x + nx * h, rightVertex.y + ny * h)
 }
 
 /**
@@ -414,17 +425,27 @@ export function computeRectangle(p1: Point, p2: Point): [Point, Point, Point, Po
  * p1, p2를 대각선 양 끝으로 보고 수직 대각선의 두 점 반환
  * 반환: [p1, right, p2, left] 순서
  */
-export function computeRhombus(p1: Point, p2: Point): [Point, Point, Point, Point] {
-  const mx = (p1.x + p2.x) / 2
-  const my = (p1.y + p2.y) / 2
-  const dx = p2.x - p1.x
-  const dy = p2.y - p1.y
-  return [
-    p1,
-    makePoint(mx + dy / 2, my - dx / 2),
-    p2,
-    makePoint(mx - dy / 2, my + dx / 2)
-  ]
+export function computeRhombus(p1: Point, p2: Point, p3: Point): [Point, Point, Point, Point] {
+  const sideDx = p2.x - p1.x
+  const sideDy = p2.y - p1.y
+  const sideLength = Math.hypot(sideDx, sideDy)
+  if (sideLength < 1e-6) {
+    return [p1, p2, p3, p3]
+  }
+
+  const hintDx = p3.x - p1.x
+  const hintDy = p3.y - p1.y
+  const hintLength = Math.hypot(hintDx, hintDy)
+  if (hintLength < 1e-6) {
+    return [p1, p2, p2, p1]
+  }
+
+  const scaledDx = (hintDx / hintLength) * sideLength
+  const scaledDy = (hintDy / hintLength) * sideLength
+  const p4 = makePoint(p1.x + scaledDx, p1.y + scaledDy)
+  const p3Prime = makePoint(p2.x + scaledDx, p2.y + scaledDy)
+
+  return [p1, p2, p3Prime, p4]
 }
 
 /**

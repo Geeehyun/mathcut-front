@@ -15,7 +15,6 @@ export const HEIGHT_DEFAULT_VISIBLE_TYPES = new Set<ShapeType>([
   'triangle-isosceles',
   'triangle-free',
   'rect-trapezoid',
-  'rect-rhombus',
   'rect-parallelogram'
 ])
 

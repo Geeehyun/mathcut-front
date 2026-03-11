@@ -6,6 +6,12 @@ import { GRID_CONFIG } from '@/types'
 type CanvasSnapshot = { shapes: Shape[], guides: Guide[] }
 const HISTORY_LIMIT = 100
 
+type AISketchImportPayload = {
+  shapes: Shape[]
+  guides: Guide[]
+  append?: boolean
+}
+
 function withCircleOppositePoint(shape: Shape): Shape {
   if (shape.type !== 'circle') return shape
   if (shape.points.length < 2) return shape
@@ -319,6 +325,19 @@ export const useCanvasStore = defineStore('canvas', () => {
     guides.value.push(guide)
   }
 
+  function importAISketchResult(payload: AISketchImportPayload) {
+    const { shapes: nextShapes, guides: nextGuides, append = true } = payload
+    if (nextShapes.length === 0 && nextGuides.length === 0) return
+
+    saveHistory()
+
+    const mappedShapes = nextShapes.map((shape) => withCircleOppositePoint(shape))
+    shapes.value = append ? [...shapes.value, ...mappedShapes] : mappedShapes
+    guides.value = append ? [...guides.value, ...nextGuides] : [...nextGuides]
+    selectedShapeId.value = null
+    selectedGuideId.value = null
+  }
+
   // 가이드 삭제
   function removeGuide(id: string) {
     saveHistory()
@@ -444,6 +463,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     moveShapeToIndex,
     removeLastShape,
     addGuide,
+    importAISketchResult,
     updateGuide,
     setGuideVisible,
     removeGuide,

@@ -107,9 +107,16 @@ export function getPointNameDefaultPos(
   const point = points[index]
   if (!point) return { x: 0, y: 0 }
 
+  if (shapeType === 'circle' && index === 0) {
+    return {
+      x: point.x - 4,
+      y: point.y - 18,
+    }
+  }
+
   let vx = 0
   let vy = 0
-  if (shapeType === 'circle' && index === 0 && points[1]) {
+  if (shapeType === 'circle' && points[1]) {
     const radiusPoint = points[1]
     vx = point.x - radiusPoint.x
     vy = point.y - radiusPoint.y
@@ -226,7 +233,13 @@ export function getShapeHeightBaseEdgeIndex(shape: Shape): number {
 export function getShapeHeightGuide(
   shape: Shape
 ): { apex: Point, foot: Point, baseA: Point, baseB: Point, t: number } | null {
-  if (shape.type === 'circle' || shape.type === 'triangle-right' || OPEN_SHAPE_TYPES.has(shape.type) || shape.points.length < 3) {
+  if (
+    shape.type === 'circle'
+    || shape.type === 'triangle-right'
+    || shape.type === 'rect-rhombus'
+    || OPEN_SHAPE_TYPES.has(shape.type)
+    || shape.points.length < 3
+  ) {
     return null
   }
 

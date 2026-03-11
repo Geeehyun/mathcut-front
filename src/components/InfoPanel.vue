@@ -16,6 +16,12 @@ const DEFAULT_UNFILLED_STROKE_PT = 0.6
 const STROKE_WIDTH_STEP_PT = 0.1
 const STROKE_WIDTH_MIN_PT = 0.1
 const STROKE_WIDTH_MAX_PT = 12
+const MM_TO_PX = 96 / 25.4
+const BLANK_BASE_HEIGHT_MM = 7
+const BLANK_WIDTH_STEP_MM = 0.5
+const BLANK_WIDTH_MIN_MM = 3
+const BLANK_WIDTH_MAX_MM = 50
+const BLANK_WIDTH_DEFAULT_MM = 7
 
 const shapeTypeNames: Record<string, string> = {
   rectangle: '직사각형',
@@ -59,6 +65,7 @@ const selectedTextGuide = computed<Guide | null>(() => {
   return guide
 })
 const hasTextGuideSelection = computed(() => !!selectedTextGuide.value)
+const isBlankBoxGuideSelection = computed(() => selectedGuide.value?.type === 'blank-box')
 const hasSelection = computed(() => hasShapeSelection.value || hasGuideSelection.value)
 const isStandalonePointSelection = computed(() => selectedShape.value?.type === 'point' || selectedShape.value?.type === 'point-on-object')
 const isArrowSelection = computed(() => selectedShape.value?.type === 'arrow' || selectedShape.value?.type === 'arrow-curve')
@@ -96,6 +103,7 @@ const selectedGuideTypeLabel = computed(() => {
   if (!selectedGuide.value) return ''
   if (selectedGuide.value.type === 'text') return '텍스트 가이드'
   if (selectedGuide.value.type === 'length') return '길이 가이드'
+  if (selectedGuide.value.type === 'blank-box') return '빈칸 박스'
   return '각도 가이드'
 })
 
@@ -152,6 +160,7 @@ const isHeightBaseConfigurable = computed(() => {
     && selectedShape.value.type !== 'rectangle'
     && selectedShape.value.type !== 'rect-rectangle'
     && selectedShape.value.type !== 'rect-square'
+    && selectedShape.value.type !== 'rect-rhombus'
     && !OPEN_SHAPE_TYPES.has(selectedShape.value.type)
     && selectedShape.value.points.length >= 3
 })
@@ -216,7 +225,7 @@ function isShapeGuideAvailable(shape: Shape | null, key: GuideToggleKey): boolea
   if (key === 'height') {
     if (shape.type === 'circle' || OPEN_SHAPE_TYPES.has(shape.type)) return false
     if (shape.type === 'triangle-right') return false
-    if (shape.type === 'rectangle' || shape.type === 'rect-rectangle' || shape.type === 'rect-square') return false
+    if (shape.type === 'rectangle' || shape.type === 'rect-rectangle' || shape.type === 'rect-square' || shape.type === 'rect-rhombus') return false
     return shape.points.length >= 3
   }
   return true
@@ -247,6 +256,24 @@ const selectedGuideFontSize = computed(() => Math.max(8, Math.min(72, Number(sel
 const selectedGuideLineWidth = computed(() => {
   const raw = Number(selectedGuide.value?.lineWidth ?? 0.4)
   return Number(Math.max(0.1, Math.min(12, raw)).toFixed(1))
+})
+const selectedGuideBlankWidthMm = computed(() => {
+  if (!selectedGuide.value || selectedGuide.value.type !== 'blank-box') return BLANK_WIDTH_DEFAULT_MM
+  const raw = Number(selectedGuide.value.blankWidthMm)
+  if (Number.isFinite(raw)) {
+    const stepped = Math.round(raw / BLANK_WIDTH_STEP_MM) * BLANK_WIDTH_STEP_MM
+    return Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, stepped))
+  }
+  const widthPx = Math.abs((selectedGuide.value.points[1]?.x || 0) - (selectedGuide.value.points[0]?.x || 0))
+  const widthMm = widthPx / MM_TO_PX
+  const stepped = Math.round(widthMm / BLANK_WIDTH_STEP_MM) * BLANK_WIDTH_STEP_MM
+  return Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, stepped || BLANK_WIDTH_DEFAULT_MM))
+})
+const selectedGuideBlankUnitMode = computed<'none' | 'cm' | 'angle'>(() => {
+  if (!selectedGuide.value || selectedGuide.value.type !== 'blank-box') return 'none'
+  return selectedGuide.value.blankUnitMode === 'cm' || selectedGuide.value.blankUnitMode === 'angle'
+    ? selectedGuide.value.blankUnitMode
+    : 'none'
 })
 
 const selectedCircleMeasureMode = computed(() => {
@@ -478,6 +505,44 @@ function setSelectedGuideLineWidth(lineWidth: number) {
   }))
 }
 
+function setSelectedGuideBlankWidthMm(widthMm: number) {
+  if (!selectedGuide.value || selectedGuide.value.type !== 'blank-box' || selectedGuide.value.points.length < 2) return
+  const clampedMm = Math.max(BLANK_WIDTH_MIN_MM, Math.min(BLANK_WIDTH_MAX_MM, Number(widthMm.toFixed(1))))
+  const widthPx = clampedMm * MM_TO_PX
+  const heightPx = BLANK_BASE_HEIGHT_MM * MM_TO_PX
+  const p1 = selectedGuide.value.points[0]
+  const p2 = selectedGuide.value.points[1]
+  const centerX = (p1.x + p2.x) / 2
+  const centerY = (p1.y + p2.y) / 2
+
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    blankWidthMm: clampedMm,
+    points: [
+      {
+        x: centerX - widthPx / 2,
+        y: centerY - heightPx / 2,
+        gridX: (centerX - widthPx / 2) / GRID_CONFIG.size,
+        gridY: (centerY - heightPx / 2) / GRID_CONFIG.size
+      },
+      {
+        x: centerX + widthPx / 2,
+        y: centerY + heightPx / 2,
+        gridX: (centerX + widthPx / 2) / GRID_CONFIG.size,
+        gridY: (centerY + heightPx / 2) / GRID_CONFIG.size
+      }
+    ]
+  }))
+}
+
+function setSelectedGuideBlankUnitMode(mode: 'none' | 'cm' | 'angle') {
+  if (!selectedGuide.value || selectedGuide.value.type !== 'blank-box') return
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    blankUnitMode: mode
+  }))
+}
+
 function setGridLineColor(color: string) {
   toolStore.setGridLineColor(color)
 }
@@ -611,13 +676,30 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
         </div>
       </div>
       <div v-else-if="hasGuideSelection" class="space-y-2">
+        <p v-if="selectedGuide?.type === 'blank-box'" class="text-[11px] text-gray-500">타입: 빈칸</p>
         <div>
           <p class="text-xs text-gray-500 mb-1">{{ selectedGuide?.type === 'text' ? '텍스트 색상' : '가이드 색상' }}</p>
           <div class="flex items-center flex-wrap gap-1.5">
             <button v-for="color in STROKE_PALETTE" :key="`guide-text-${color.id}`" class="w-5 h-5 rounded-full border hover:scale-110 transition" :class="selectedGuideColor === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setSelectedGuideColor(color.hex)"></button>
           </div>
         </div>
-        <div>
+        <div v-if="selectedGuide?.type === 'blank-box'">
+          <p class="text-xs text-gray-500 mb-1">빈칸 폭 (mm)</p>
+          <div class="flex items-center gap-1">
+            <button class="step-btn" @click="setSelectedGuideBlankWidthMm(selectedGuideBlankWidthMm - BLANK_WIDTH_STEP_MM)">-</button>
+            <span class="text-xs w-12 text-center">{{ selectedGuideBlankWidthMm.toFixed(1) }}</span>
+            <button class="step-btn" @click="setSelectedGuideBlankWidthMm(selectedGuideBlankWidthMm + BLANK_WIDTH_STEP_MM)">+</button>
+          </div>
+        </div>
+        <div v-if="selectedGuide?.type === 'blank-box'">
+          <p class="text-xs text-gray-500 mb-1">단위 표시</p>
+          <div class="grid grid-cols-3 gap-2">
+            <button class="action-btn text-xs px-2 py-0.5 min-h-0" :class="{ active: selectedGuideBlankUnitMode === 'none' }" @click="setSelectedGuideBlankUnitMode('none')">공란</button>
+            <button class="action-btn text-xs px-2 py-0.5 min-h-0" :class="{ active: selectedGuideBlankUnitMode === 'cm' }" @click="setSelectedGuideBlankUnitMode('cm')">cm</button>
+            <button class="action-btn text-xs px-2 py-0.5 min-h-0" :class="{ active: selectedGuideBlankUnitMode === 'angle' }" @click="setSelectedGuideBlankUnitMode('angle')">각도기호</button>
+          </div>
+        </div>
+        <div v-if="selectedGuide?.type === 'text'">
           <p class="text-xs text-gray-500 mb-1">글자 크기</p>
           <div class="flex items-center gap-1">
             <button class="step-btn" @click="setSelectedGuideFontSize(selectedGuideFontSize - 1)">-</button>
@@ -661,7 +743,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
     </section>
 
-    <section v-if="!hasTextGuideSelection" class="panel-section">
+    <section v-if="!hasTextGuideSelection && !isBlankBoxGuideSelection" class="panel-section">
       <h4 class="panel-title">가이드</h4>
       <div class="space-y-2">
         <label v-if="isShapeGuideAvailable(selectedShape, 'length')" class="toggle-row"><span>길이</span><button class="guide-toggle-btn" @click="hasSelection ? toggleSelectedGuide('length') : toggleGlobalGuide('length')">{{ hasSelection ? getSelectedGuideIndicator('length') : getGlobalGuideIndicator('length') }}</button></label>

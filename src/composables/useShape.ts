@@ -82,7 +82,7 @@ export function useShape() {
       'rect-square': 2,
       'rect-rectangle': 2,
       'rect-trapezoid': 3,
-      'rect-rhombus': 2,
+      'rect-rhombus': 3,
       'rect-parallelogram': 3,
       'rect-free': 4,
       'polygon-regular': 2
@@ -121,8 +121,8 @@ export function useShape() {
       points = [tempPoints[0], tempPoints[1], p3, p4]
     } else if (shapeType === 'rect-rectangle' && tempPoints.length >= 2) {
       points = computeRectangle(tempPoints[0], tempPoints[1])
-    } else if (shapeType === 'rect-rhombus' && tempPoints.length >= 2) {
-      points = computeRhombus(tempPoints[0], tempPoints[1])
+    } else if (shapeType === 'rect-rhombus' && tempPoints.length >= 3) {
+      points = computeRhombus(tempPoints[0], tempPoints[1], tempPoints[2])
     } else if (shapeType === 'rect-parallelogram' && tempPoints.length >= 3) {
       points = [tempPoints[0], tempPoints[1], computeParallelogram(tempPoints[0], tempPoints[1], tempPoints[2]), tempPoints[2]]
     } else if (shapeType === 'rect-trapezoid' && tempPoints.length >= 3) {
