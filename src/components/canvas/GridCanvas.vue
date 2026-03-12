@@ -13,7 +13,6 @@ import {
   getRightAngleMarkerPoints,
   getLengthGuideControlPoint,
   createQuadraticCurvePoints,
-  computeAngleDegrees,
   distancePointToPolyline,
   formatRoundedValue,
   formatAngleDegrees,
@@ -63,6 +62,7 @@ import {
   getShapeAutoLengthIndices,
   getShapeHeightBaseEdgeIndex as getSharedShapeHeightBaseIndex,
   getShapeHeightGuide as getSharedShapeHeightGuide,
+  getShapeInteriorAngleInfo,
   getShapeAngleLabelPos as getSharedShapeAngleLabelPos,
   getCircleLengthLabelPos as getSharedCircleLengthLabelPos,
   getShapeHeightLabelPos as getSharedShapeHeightLabelPos,
@@ -238,6 +238,22 @@ const gridShapeRenderKey = computed(
   () => `${toolStore.gridMode}:${toolStore.gridLineColor}:${stageWidth.value}x${stageHeight.value}`
 )
 const shapeMap = computed(() => new Map(canvasStore.shapes.map((shape) => [shape.id, shape])))
+const guideMap = computed(() => new Map(canvasStore.guides.map((guide) => [guide.id, guide])))
+const topLevelRenderItems = computed(() => {
+  return canvasStore.topLevelOrder
+    .map((itemKey) => {
+      if (itemKey.startsWith('shape:')) {
+        const shape = shapeMap.value.get(itemKey.slice(6))
+        return shape ? { kind: 'shape' as const, shape } : null
+      }
+      if (itemKey.startsWith('guide:')) {
+        const guide = guideMap.value.get(itemKey.slice(6))
+        return guide && !guide.shapeId ? { kind: 'guide' as const, guide } : null
+      }
+      return null
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+})
 const selectedTextGuideId = ref<string | null>(null)
 const shapeGuideValueEditState = ref<{
   shapeId: string
@@ -1189,9 +1205,9 @@ function cancelShapeGuideValueEdit() {
 
 function getActualShapeGuideNumericValue(shape: Shape, key: 'length' | 'angle' | 'height', itemIndex: number): string {
   if (key === 'angle') {
-    const triplet = getShapeAngleTriplet(shape, itemIndex)
-    if (!triplet) return ''
-    return formatRoundedValue(computeAngleDegrees(triplet.prev, triplet.vertex, triplet.next))
+    const interiorInfo = getShapeInteriorAngleInfo(shape, itemIndex)
+    if (!interiorInfo) return ''
+    return formatRoundedValue(interiorInfo.degrees)
   }
   if (key === 'height') {
     const heightGuide = getShapeHeightGuide(shape)
@@ -1336,9 +1352,9 @@ function shouldPlaceCircleCenterPointNameBelow(shape: Shape, index: number): boo
 function getShapeAngleValueText(shape: Shape, index: number): string {
   const customText = getShapeGuideItemStyle(shape, 'angle', index).customText?.trim()
   if (customText) return customText
-  const triplet = getShapeAngleTriplet(shape, index)
-  if (!triplet) return ''
-  return formatAngleDegrees(computeAngleDegrees(triplet.prev, triplet.vertex, triplet.next))
+  const interiorInfo = getShapeInteriorAngleInfo(shape, index)
+  if (!interiorInfo) return ''
+  return formatAngleDegrees(interiorInfo.degrees)
 }
 
 function getShapeAngleLabelPos(shape: Shape, index: number): { x: number, y: number } {
@@ -1386,13 +1402,22 @@ function logAngleGuidePlacement(shapeId: string, angleIndex: number) {
 function getShapeAngleArcPolyline(shape: Shape, index: number): number[] {
   const triplet = getShapeAngleTriplet(shape, index)
   if (!triplet) return []
-  return getAngleArcPoints([triplet.prev, triplet.vertex, triplet.next])
+  const interiorInfo = getShapeInteriorAngleInfo(shape, index)
+  return getAngleArcPoints([triplet.prev, triplet.vertex, triplet.next], {
+    reflex: interiorInfo?.isReflex === true
+  })
 }
 
 function isRightAngleAt(shape: Shape, index: number): boolean {
-  const triplet = getShapeAngleTriplet(shape, index)
-  if (!triplet) return false
-  return isRightAngleByThreePoints(triplet.prev, triplet.vertex, triplet.next)
+  const interiorInfo = getShapeInteriorAngleInfo(shape, index)
+  if (!interiorInfo) return false
+  return Math.abs(interiorInfo.degrees - 90) < 0.05
+}
+
+function shouldRenderShapeAngleText(shape: Shape, index: number, mode: 'right' | 'all'): boolean {
+  if (isShapeGuideItemBlank(shape, 'angle', index)) return false
+  if (mode === 'all' || shape.type === 'angle-line') return true
+  return !isRightAngleAt(shape, index)
 }
 
 function getShapeLengthCurveSide(shape: Shape, index: number): 1 | -1 | undefined {
@@ -2166,7 +2191,7 @@ function getTwoPointLengthCurvePoints(p1: { x: number, y: number }, p2: { x: num
   return createQuadraticCurvePoints(p1, cp, p2)
 }
 
-function getAngleArcPoints(points: { x: number, y: number }[]): number[] {
+function getAngleArcPoints(points: { x: number, y: number }[], options?: { reflex?: boolean }): number[] {
   const p1 = points[0]
   const vertex = points[1]
   const p2 = points[2]
@@ -2177,6 +2202,9 @@ function getAngleArcPoints(points: { x: number, y: number }[]): number[] {
   let delta = a2 - a1
   if (delta > Math.PI) delta -= Math.PI * 2
   if (delta < -Math.PI) delta += Math.PI * 2
+  if (options?.reflex) {
+    delta = delta > 0 ? delta - (Math.PI * 2) : delta + (Math.PI * 2)
+  }
 
   const steps = 18
   const pts: number[] = []
@@ -2541,6 +2569,7 @@ const latexShapeGuideOverlays = computed(() => {
           })
           continue
         }
+        if (!shouldRenderShapeAngleText(shape, itemIndex, toolStore.angleDisplayMode)) continue
         const text = getShapeAngleValueText(shape, itemIndex)
         if (!text) continue
         const pos = getShapeGuideLatexTopLeft(shape, 'angle', itemIndex)
@@ -2576,6 +2605,13 @@ type RuntimeLatexCanvasEntry = {
 }
 
 const runtimeShapeLatexEntries = computed<RuntimeLatexCanvasEntry[]>(() => [
+  ...latexTextGuideOverlays.value.map((overlay) => ({
+    key: `text:${overlay.key}`,
+    html: overlay.html,
+    color: overlay.color,
+    fontSize: overlay.fontSize,
+    fontFamily: DEFAULT_TEXT_FONT_FAMILY
+  })),
   ...latexPointLabelOverlays.value.map((overlay) => ({
     key: `point:${overlay.key}`,
     html: overlay.html,
@@ -2629,9 +2665,23 @@ const latexPointLabelOverlayMap = computed(() => {
   return new Map(latexPointLabelOverlays.value.map((overlay) => [overlay.key, overlay]))
 })
 
+const latexTextGuideOverlayMap = computed(() => {
+  return new Map(latexTextGuideOverlays.value.map((overlay) => [overlay.key, overlay]))
+})
+
 const latexShapeGuideOverlayMap = computed(() => {
   return new Map(latexShapeGuideOverlays.value.map((overlay) => [overlay.key, overlay]))
 })
+
+function getRuntimeTextGuideLatexSprite(guideId: string) {
+  const overlay = latexTextGuideOverlayMap.value.get(guideId)
+  const sprite = runtimeShapeLatexSprites.value[`text:${guideId}`]
+  if (!overlay || !sprite) return null
+  return {
+    overlay,
+    sprite
+  }
+}
 
 function getRuntimePointLatexSprite(shapeId: string, pointIndex: number) {
   const overlay = latexPointLabelOverlayMap.value.get(`${shapeId}-${pointIndex}`)
@@ -2667,8 +2717,26 @@ function getRuntimeLatexImageY(
   return snapTextValue(overlay.y - sprite.insetY)
 }
 
+function getRuntimeTextGuideImageConfig(guideId: string) {
+  const runtime = getRuntimeTextGuideLatexSprite(guideId)
+  if (!runtime) return null
+  const { overlay, sprite } = runtime
+  const x = snapTextValue(overlay.x)
+  const y = snapTextValue(overlay.y - (overlay.fontSize * 0.45))
+  return {
+    image: sprite.image,
+    x,
+    y,
+    width: sprite.width,
+    height: sprite.height,
+    offsetX: snapTextValue((sprite.contentWidth * 0.5) + sprite.insetX),
+    offsetY: snapTextValue((overlay.fontSize * 0.45) + sprite.insetY),
+    rotation: overlay.rotation
+  }
+}
+
 function shouldRenderCanvasTextGuide(): boolean {
-  return false
+  return true
 }
 
 // ── 진짜 벡터 SVG 내보내기 ───────────────────────────────────────────
@@ -2733,6 +2801,7 @@ const { exportImage, createPngDataUrl } = useCanvasExport({
     getRightAngleMarkerPoints,
     getShapeAngleArcPolyline,
     getShapeAngleValueText,
+    shouldRenderShapeAngleText,
     getShapeAngleTextOffsetX,
     getShapeAngleTextOffsetY,
     getShapePointNameTextPos,
@@ -2795,8 +2864,10 @@ defineExpose({ exportImage, createPngDataUrl })
 
       <!-- Shape layer -->
       <v-layer>
-        <!-- Existing shapes -->
-        <template v-for="shape in canvasStore.shapes.filter((s) => s.visible !== false)" :key="shape.id">
+        <!-- Top-level items -->
+        <template v-for="item in topLevelRenderItems" :key="item.kind === 'shape' ? item.shape.id : item.guide.id">
+          <template v-if="item.kind === 'shape' && item.shape.visible !== false">
+            <template v-for="shape in [item.shape]" :key="shape.id">
           <template v-if="shape.type === 'point' || shape.type === 'point-on-object'">
             <v-circle
               @click="handleShapeNodeClick(shape.id, $event)"
@@ -3719,6 +3790,133 @@ defineExpose({ exportImage, createPngDataUrl })
               listening: false
             }"
           />
+            </template>
+          </template>
+          <template v-else-if="item.kind === 'guide' && item.guide.visible !== false">
+            <template v-for="guide in [item.guide]" :key="guide.id">
+              <template v-if="guide.type === 'length' && toolStore.showLength">
+                <v-line
+                  @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                  :config="{
+                    name: getGuideNodeName(guide.id),
+                    points: getLengthGuideCurvePoints(guide),
+                    stroke: guide.color || LENGTH_GUIDE_DEFAULT_COLOR,
+                    strokeWidth: guide.lineWidth || DEFAULT_GUIDE_LINE_PX,
+                    dash: [5, 5]
+                  }"
+                />
+                <v-text
+                  @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                  :config="{
+                    name: getGuideNodeName(guide.id),
+                    x: getLengthGuideLabelPos(guide).x,
+                    y: getLengthGuideLabelPos(guide).y - 16,
+                    text: formatMathText(formatLengthGuideText(guide.text)),
+                    fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
+                    fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+                    fill: guide.color || LENGTH_GUIDE_DEFAULT_COLOR,
+                    fontStyle: 'normal',
+                    align: 'center',
+                    offsetX: 20
+                  }"
+                />
+              </template>
+              <template v-if="shouldRenderCanvasTextGuide() && guide.type === 'text'">
+                <v-image
+                  v-if="getRuntimeTextGuideImageConfig(guide.id)"
+                  @click="handleTextGuideClick(guide.id, $event)"
+                  @mousedown="handleTextGuideMouseDown(guide.id, $event)"
+                  @mouseenter="handleTextGuideMouseEnter(guide.id)"
+                  @mouseleave="handleTextGuideMouseLeave(guide.id)"
+                  @dblclick="handleTextGuideDblClick(guide.id, $event)"
+                  @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                  :config="{
+                    name: getGuideNodeName(guide.id),
+                    ...getRuntimeTextGuideImageConfig(guide.id)!,
+                    shadowColor: isTextGuideHighlighted(guide.id) ? '#38BDF8' : 'transparent',
+                    shadowBlur: isTextGuideHighlighted(guide.id) ? 10 : 0,
+                    shadowOpacity: isTextGuideHighlighted(guide.id) ? 0.7 : 0
+                  }"
+                />
+              </template>
+              <template v-if="guide.type === 'blank-box'">
+                <v-rect
+                  @click="handleBlankBoxGuideClick(guide.id, $event)"
+                  @mousedown="handleBlankBoxGuideMouseDown(guide.id, $event)"
+                  @mouseenter="handleBlankBoxGuideMouseEnter(guide.id)"
+                  @mouseleave="handleBlankBoxGuideMouseLeave(guide.id)"
+                  @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                  :config="{
+                    name: getGuideNodeName(guide.id),
+                    x: getBlankBoxRect(guide).x,
+                    y: getBlankBoxRect(guide).y,
+                    width: getBlankBoxRect(guide).width,
+                    height: getBlankBoxRect(guide).height,
+                    cornerRadius: getBlankBoxRect(guide).cornerRadius,
+                    stroke: isBlankBoxGuideHighlighted(guide.id) ? '#38BDF8' : BLANK_BORDER_COLOR,
+                    strokeWidth: isBlankBoxGuideHighlighted(guide.id) ? BLANK_BORDER_WIDTH_PX + 1 : BLANK_BORDER_WIDTH_PX,
+                    fill: '#FFFFFF',
+                    shadowColor: isBlankBoxGuideHighlighted(guide.id) ? '#0EA5E9' : 'transparent',
+                    shadowBlur: isBlankBoxGuideHighlighted(guide.id) ? 10 : 0,
+                    shadowOpacity: isBlankBoxGuideHighlighted(guide.id) ? 0.45 : 0
+                  }"
+                />
+                <v-text
+                  v-if="getBlankBoxSuffixText(guide)"
+                  :config="{
+                    x: getBlankBoxSuffixPos(guide).x,
+                    y: getBlankBoxSuffixPos(guide).y,
+                    text: getBlankBoxSuffixText(guide),
+                    fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
+                    fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+                    fill: DEFAULT_TEXT_COLOR,
+                    fontStyle: 'normal',
+                    listening: false
+                  }"
+                />
+              </template>
+              <template v-if="guide.type === 'angle' && toolStore.showAngle">
+                <template v-if="isRightAngleGuide(guide.points)">
+                  <v-line
+                    @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                    :config="{
+                      name: getGuideNodeName(guide.id),
+                      points: (() => {
+                        const marker = getRightAngleGuideMarkerPoints(guide.points[0], guide.points[1], guide.points[2], GUIDE_RIGHT_ANGLE_MARKER_SIZE)
+                        return [marker.p1.x, marker.p1.y, marker.corner.x, marker.corner.y, marker.p2.x, marker.p2.y]
+                      })(),
+                      stroke: guide.color || ANGLE_GUIDE_DEFAULT_COLOR,
+                      strokeWidth: guide.lineWidth || DEFAULT_GUIDE_LINE_PX
+                    }"
+                  />
+                </template>
+                <template v-else>
+                  <v-line
+                    @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                    :config="{
+                      name: getGuideNodeName(guide.id),
+                      points: getAngleArcPoints(guide.points),
+                      stroke: guide.color || ANGLE_GUIDE_DEFAULT_COLOR,
+                      strokeWidth: guide.lineWidth || DEFAULT_GUIDE_LINE_PX
+                    }"
+                  />
+                </template>
+                <v-text
+                  @contextmenu="handleGuideContextMenu(guide.id, $event)"
+                  :config="{
+                    name: getGuideNodeName(guide.id),
+                    x: guide.points[1].x + 24,
+                    y: guide.points[1].y - 18,
+                    text: formatMathText(guide.text || ''),
+                    fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
+                    fontFamily: DEFAULT_TEXT_FONT_FAMILY,
+                    fill: guide.color || ANGLE_GUIDE_DEFAULT_COLOR,
+                    fontStyle: 'normal'
+                  }"
+                />
+              </template>
+            </template>
+          </template>
         </template>
         <template
           v-if="toolStore.mode === 'select' && selectedTextGuideId && selectedTextGuideTransformUI && !textGuideTransformDrag"
@@ -3784,7 +3982,7 @@ defineExpose({ exportImage, createPngDataUrl })
 
       <!-- Guide layer -->
       <v-layer>
-        <template v-for="guide in canvasStore.guides" :key="guide.id">
+        <template v-for="guide in canvasStore.guides.filter((g) => g.shapeId)" :key="guide.id">
           <!-- Length guides -->
           <template v-if="guide.type === 'length' && guide.visible !== false && toolStore.showLength">
             <v-line
@@ -3816,7 +4014,24 @@ defineExpose({ exportImage, createPngDataUrl })
 
           <!-- Text guides -->
           <template v-if="shouldRenderCanvasTextGuide() && guide.type === 'text' && guide.visible !== false">
+            <v-image
+              v-if="getRuntimeTextGuideImageConfig(guide.id)"
+              @click="handleTextGuideClick(guide.id, $event)"
+              @mousedown="handleTextGuideMouseDown(guide.id, $event)"
+              @mouseenter="handleTextGuideMouseEnter(guide.id)"
+              @mouseleave="handleTextGuideMouseLeave(guide.id)"
+              @dblclick="handleTextGuideDblClick(guide.id, $event)"
+              @contextmenu="handleGuideContextMenu(guide.id, $event)"
+              :config="{
+                name: getGuideNodeName(guide.id),
+                ...getRuntimeTextGuideImageConfig(guide.id)!,
+                shadowColor: isTextGuideHighlighted(guide.id) ? '#38BDF8' : 'transparent',
+                shadowBlur: isTextGuideHighlighted(guide.id) ? 10 : 0,
+                shadowOpacity: isTextGuideHighlighted(guide.id) ? 0.7 : 0
+              }"
+            />
             <v-text
+              v-else
               @click="handleTextGuideClick(guide.id, $event)"
               @mousedown="handleTextGuideMouseDown(guide.id, $event)"
               @mouseenter="handleTextGuideMouseEnter(guide.id)"
@@ -4020,7 +4235,7 @@ defineExpose({ exportImage, createPngDataUrl })
       </v-layer>
     </v-stage>
       <CanvasLatexOverlays
-        :latex-text-guide-overlays="latexTextGuideOverlays"
+        :latex-text-guide-overlays="[]"
         :latex-point-label-overlays="[]"
         :latex-shape-guide-overlays="[]"
         :zoom-scale="zoomScale"

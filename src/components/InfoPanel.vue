@@ -59,6 +59,15 @@ const selectedShape = computed(() => canvasStore.selectedShape)
 const selectedGuide = computed(() => canvasStore.selectedGuide)
 const hasShapeSelection = computed(() => !!selectedShape.value)
 const hasGuideSelection = computed(() => !!selectedGuide.value)
+const isStandaloneGuideSelection = computed(() => !!selectedGuide.value && !selectedGuide.value.shapeId)
+const selectedTopLevelItemKey = computed(() => {
+  if (selectedShape.value) return canvasStore.getShapeTopLevelKey(selectedShape.value.id)
+  if (isStandaloneGuideSelection.value && selectedGuide.value) {
+    return canvasStore.getGuideTopLevelKey(selectedGuide.value.id)
+  }
+  return null
+})
+const hasTopLevelSelection = computed(() => !!selectedTopLevelItemKey.value)
 const selectedTextGuide = computed<Guide | null>(() => {
   const guide = selectedGuide.value
   if (!guide || guide.type !== 'text') return null
@@ -420,35 +429,97 @@ function deleteSelected() {
 }
 
 function flip(axis: 'horizontal' | 'vertical') {
-  if (!selectedShape.value) return
-  const cx = selectedShape.value.points.reduce((sum, p) => sum + p.x, 0) / selectedShape.value.points.length
-  const cy = selectedShape.value.points.reduce((sum, p) => sum + p.y, 0) / selectedShape.value.points.length
-  canvasStore.updateShape(selectedShape.value.id, (shape) => ({
-    ...shape,
-    points: shape.points.map((p) => {
-      if (axis === 'horizontal') return toPoint(2 * cx - p.x, p.y)
-      return toPoint(p.x, 2 * cy - p.y)
-    })
-  }))
+  if (selectedShape.value) {
+    const cx = selectedShape.value.points.reduce((sum, p) => sum + p.x, 0) / selectedShape.value.points.length
+    const cy = selectedShape.value.points.reduce((sum, p) => sum + p.y, 0) / selectedShape.value.points.length
+    canvasStore.updateShape(selectedShape.value.id, (shape) => ({
+      ...shape,
+      points: shape.points.map((p) => {
+        if (axis === 'horizontal') return toPoint(2 * cx - p.x, p.y)
+        return toPoint(p.x, 2 * cy - p.y)
+      })
+    }))
+    return
+  }
+  if (!isStandaloneGuideSelection.value || !selectedGuide.value) return
+  if (selectedGuide.value.type === 'text') {
+    canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+      ...guide,
+      rotation: normalizeGuideRotation(axis === 'horizontal'
+        ? 180 - getGuideRotation(guide)
+        : -getGuideRotation(guide))
+    }))
+    return
+  }
+  transformStandaloneGuidePoints((p, cx, cy) => {
+    if (axis === 'horizontal') return toPoint(2 * cx - p.x, p.y)
+    return toPoint(p.x, 2 * cy - p.y)
+  })
 }
 
 function rotate(direction: 'cw' | 'ccw') {
-  if (!selectedShape.value) return
   const angle = Math.abs(rotateAngle.value || 0) * (direction === 'cw' ? 1 : -1)
-  const rad = (angle * Math.PI) / 180
-  const cx = selectedShape.value.points.reduce((sum, p) => sum + p.x, 0) / selectedShape.value.points.length
-  const cy = selectedShape.value.points.reduce((sum, p) => sum + p.y, 0) / selectedShape.value.points.length
+  if (selectedShape.value) {
+    const rad = (angle * Math.PI) / 180
+    const cx = selectedShape.value.points.reduce((sum, p) => sum + p.x, 0) / selectedShape.value.points.length
+    const cy = selectedShape.value.points.reduce((sum, p) => sum + p.y, 0) / selectedShape.value.points.length
 
-  canvasStore.updateShape(selectedShape.value.id, (shape) => ({
-    ...shape,
-    points: shape.points.map((p) => {
-      const dx = p.x - cx
-      const dy = p.y - cy
-      return toPoint(
-        cx + dx * Math.cos(rad) - dy * Math.sin(rad),
-        cy + dx * Math.sin(rad) + dy * Math.cos(rad)
-      )
-    })
+    canvasStore.updateShape(selectedShape.value.id, (shape) => ({
+      ...shape,
+      points: shape.points.map((p) => {
+        const dx = p.x - cx
+        const dy = p.y - cy
+        return toPoint(
+          cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+          cy + dx * Math.sin(rad) + dy * Math.cos(rad)
+        )
+      })
+    }))
+    return
+  }
+  if (!isStandaloneGuideSelection.value || !selectedGuide.value) return
+  if (selectedGuide.value.type === 'text') {
+    canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+      ...guide,
+      rotation: normalizeGuideRotation(getGuideRotation(guide) + angle)
+    }))
+    return
+  }
+  const rad = (angle * Math.PI) / 180
+  transformStandaloneGuidePoints((p, cx, cy) => {
+    const dx = p.x - cx
+    const dy = p.y - cy
+    return toPoint(
+      cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+      cy + dx * Math.sin(rad) + dy * Math.cos(rad)
+    )
+  })
+}
+
+function getGuideRotation(guide: Guide): number {
+  return Number.isFinite(guide.rotation) ? Number(guide.rotation) : 0
+}
+
+function normalizeGuideRotation(rotation: number): number {
+  const normalized = rotation % 360
+  return normalized < 0 ? normalized + 360 : normalized
+}
+
+function getStandaloneGuideCenter(guide: Guide): { x: number, y: number } {
+  if (guide.points.length === 0) return { x: 0, y: 0 }
+  const cx = guide.points.reduce((sum, p) => sum + p.x, 0) / guide.points.length
+  const cy = guide.points.reduce((sum, p) => sum + p.y, 0) / guide.points.length
+  return { x: cx, y: cy }
+}
+
+function transformStandaloneGuidePoints(
+  transform: (point: Point, centerX: number, centerY: number) => Point
+) {
+  if (!isStandaloneGuideSelection.value || !selectedGuide.value) return
+  const center = getStandaloneGuideCenter(selectedGuide.value)
+  canvasStore.updateGuide(selectedGuide.value.id, (guide) => ({
+    ...guide,
+    points: guide.points.map((point) => transform(point, center.x, center.y))
   }))
 }
 
@@ -576,8 +647,8 @@ function cycleSelectedHeightBase(step: -1 | 1) {
 }
 
 function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
-  if (!selectedShape.value) return
-  canvasStore.reorderShape(selectedShape.value.id, direction)
+  if (!selectedTopLevelItemKey.value) return
+  canvasStore.reorderTopLevelItem(selectedTopLevelItemKey.value, direction)
 }
 </script>
 
@@ -628,9 +699,9 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       <p class="text-[11px] text-gray-500 mt-2">도형 선택·수정 | Space + 드래그로 화면 이동.</p>
     </section>
 
-    <section v-if="hasShapeSelection" class="panel-section">
+    <section v-if="hasShapeSelection || isStandaloneGuideSelection" class="panel-section">
       <h4 class="panel-title">회전/대칭</h4>
-      <p class="text-[11px] text-gray-500">도형 회전은 캔버스에서 마우스 드래그로도 조절 가능합니다.</p>
+      <p class="text-[11px] text-gray-500">{{ hasShapeSelection ? '도형 회전은 캔버스에서 마우스 드래그로도 조절 가능합니다.' : '독립 가이드는 선택 상태에서 회전/대칭을 적용합니다.' }}</p>
       <div class="flex items-center gap-2 mt-2">
         <input v-model.number="rotateAngle" type="number" min="1" class="input-sm w-20">
         <span class="text-xs text-gray-400">도</span>
@@ -733,7 +804,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
     </section>
 
-    <section v-if="hasShapeSelection" class="panel-section">
+    <section v-if="hasTopLevelSelection" class="panel-section">
       <h4 class="panel-title">레이어 순서</h4>
       <div class="grid grid-cols-4 gap-2">
         <button class="layer-icon-btn" title="앞으로" @click="reorderLayer('up')">앞</button>

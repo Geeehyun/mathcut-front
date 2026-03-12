@@ -140,6 +140,7 @@ interface SvgRenderOptions {
   getRightAngleMarkerPoints: (points: Point[], index: number) => RightAngleMarker | null
   getShapeAngleArcPolyline: (shape: Shape, index: number) => number[]
   getShapeAngleValueText: (shape: Shape, index: number) => string
+  shouldRenderShapeAngleText: (shape: Shape, index: number, mode: 'right' | 'all') => boolean
   getShapeAngleTextOffsetX: (shape: Shape, index: number, text: string, fontSize: number) => number
   getShapeAngleTextOffsetY: (shape: Shape, index: number, fontSize: number) => number
   getShapePointNameTextPos: (shape: Shape, index: number) => PointLike
@@ -607,10 +608,10 @@ async function generateVectorSVG(
         }
         if (!svg.isShapeGuideItemBlank(shape, 'angle', ai)) {
           const pos = svg.getShapeGuideLabelWorldPos(shape, 'angle', ai)
-          const text = svg.getShapeAngleValueText(shape, ai)
-          const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
           const fontSize = aSt.fontSize || fs
-          if (text) {
+          if (svg.shouldRenderShapeAngleText(shape, ai, toolStore.angleDisplayMode)) {
+            const text = svg.getShapeAngleValueText(shape, ai)
+            const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
             const width = svg.getTextWidthPx(text.replace(/°$/, '') + '°', fontSize) + 8
             els.push(svgForeignObjectKatexEl(
               renderLatexLikeHtml(toAngleLatex(text), true),

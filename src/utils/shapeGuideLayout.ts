@@ -1,6 +1,6 @@
 import type { Point, Shape, ShapeGuideItemStyle, ShapeType } from '@/types'
 import { GRID_CONFIG } from '@/types'
-import { findRightAngles } from '@/utils/geometry'
+import { computeAngleDegrees, findRightAngles } from '@/utils/geometry'
 import { OPEN_SHAPE_TYPES } from '@/constants/shapeRules'
 import { getRightAngleGuideMarkerPoints, getLengthGuideControlPoint, createQuadraticCurvePoints, isRightAngleByThreePoints } from '@/utils/geometry'
 
@@ -164,6 +164,14 @@ export function getShapeAutoAngleIndices(
   if (angleDisplayMode === 'all') {
     return shape.points.map((_, index) => index)
   }
+  if (shape.type === 'free-shape') {
+    return shape.points
+      .map((_, index) => index)
+      .filter((index) => {
+        const info = getShapeInteriorAngleInfo(shape, index)
+        return info ? Math.abs(info.degrees - 90) < 0.05 : false
+      })
+  }
   return findRightAngles(shape.points)
 }
 
@@ -188,6 +196,84 @@ export function getShapeAngleTriplet(
   const next = shape.points[(index + 1) % pointCount]
   if (!prev || !vertex || !next) return null
   return { prev, vertex, next }
+}
+
+export function getShapeInteriorAngleInfo(
+  shape: Shape,
+  index: number
+): { degrees: number, isReflex: boolean, bisector: { x: number, y: number } } | null {
+  const triplet = getShapeAngleTriplet(shape, index)
+  if (!triplet) return null
+
+  const e1x = triplet.prev.x - triplet.vertex.x
+  const e1y = triplet.prev.y - triplet.vertex.y
+  const e2x = triplet.next.x - triplet.vertex.x
+  const e2y = triplet.next.y - triplet.vertex.y
+  const m1 = Math.hypot(e1x, e1y) || 1
+  const m2 = Math.hypot(e2x, e2y) || 1
+  const u1x = e1x / m1
+  const u1y = e1y / m1
+  const u2x = e2x / m2
+  const u2y = e2y / m2
+
+  let bx = u1x + u2x
+  let by = u1y + u2y
+  let bm = Math.hypot(bx, by)
+  if (bm <= 1e-6) {
+    bx = -u1y
+    by = u1x
+    bm = Math.hypot(bx, by) || 1
+  }
+  bx /= bm
+  by /= bm
+
+  const smallDegrees = computeAngleDegrees(triplet.prev, triplet.vertex, triplet.next)
+  const shouldUsePolygonInteriorAngle =
+    shape.points.length >= 3
+    && shape.type !== 'circle'
+    && shape.type !== 'angle-line'
+    && !OPEN_SHAPE_TYPES.has(shape.type)
+
+  if (!shouldUsePolygonInteriorAngle) {
+    return {
+      degrees: smallDegrees,
+      isReflex: false,
+      bisector: { x: bx, y: by }
+    }
+  }
+
+  let signedArea2 = 0
+  for (let i = 0; i < shape.points.length; i++) {
+    const a = shape.points[i]
+    const b = shape.points[(i + 1) % shape.points.length]
+    if (!a || !b) continue
+    signedArea2 += (a.x * b.y) - (b.x * a.y)
+  }
+  const orientation = Math.sign(signedArea2)
+
+  const incomingX = triplet.vertex.x - triplet.prev.x
+  const incomingY = triplet.vertex.y - triplet.prev.y
+  const outgoingX = triplet.next.x - triplet.vertex.x
+  const outgoingY = triplet.next.y - triplet.vertex.y
+  const turn = (incomingX * outgoingY) - (incomingY * outgoingX)
+
+  const isReflex = orientation === 0
+    ? false
+    : orientation > 0
+      ? turn < 0
+      : turn > 0
+
+  return isReflex
+    ? {
+      degrees: 360 - smallDegrees,
+      isReflex: true,
+      bisector: { x: -bx, y: -by }
+    }
+    : {
+      degrees: smallDegrees,
+      isReflex: false,
+      bisector: { x: bx, y: by }
+    }
 }
 
 export function getLengthGuideLabelPos(guide: { points: { x: number, y: number }[] }): { x: number, y: number } {
@@ -769,30 +855,13 @@ export function getShapeAngleLabelPos(
 ): { x: number, y: number } {
   const triplet = getShapeAngleTriplet(shape, index)
   if (!triplet) return { x: 0, y: 0 }
+  const interiorInfo = getShapeInteriorAngleInfo(shape, index)
+  if (!interiorInfo) return { x: 0, y: 0 }
 
-  const e1x = triplet.prev.x - triplet.vertex.x
-  const e1y = triplet.prev.y - triplet.vertex.y
-  const e2x = triplet.next.x - triplet.vertex.x
-  const e2y = triplet.next.y - triplet.vertex.y
-  const m1 = Math.hypot(e1x, e1y) || 1
-  const m2 = Math.hypot(e2x, e2y) || 1
-  const u1x = e1x / m1
-  const u1y = e1y / m1
-  const u2x = e2x / m2
-  const u2y = e2y / m2
+  const bx = interiorInfo.bisector.x
+  const by = interiorInfo.bisector.y
 
-  let bx = u1x + u2x
-  let by = u1y + u2y
-  let bm = Math.hypot(bx, by)
-  if (bm <= 1e-6) {
-    bx = -u1y
-    by = u1x
-    bm = Math.hypot(bx, by) || 1
-  }
-  bx /= bm
-  by /= bm
-
-  const isRightAngle = isRightAngleByThreePoints(triplet.prev, triplet.vertex, triplet.next)
+  const isRightAngle = Math.abs(interiorInfo.degrees - 90) < 0.05
   const halfW = textWidth * 0.5
   const halfH = fontSize * 0.62
   const halfExtentAlongBisector = Math.abs(bx) * halfW + Math.abs(by) * halfH
@@ -816,8 +885,7 @@ export function getShapeAngleLabelPos(
     const minimum = boundaryDist + 2 + (halfExtentAlongBisector * 0.85)
     centerDist = Math.max(minimum, Math.min(centerDist, preferred))
   } else {
-    const dot = Math.max(-1, Math.min(1, (u1x * u2x) + (u1y * u2y)))
-    const angleDeg = (Math.acos(dot) * 180) / Math.PI
+    const angleDeg = interiorInfo.degrees
     const obtuseRatio = Math.max(0, Math.min(1, (angleDeg - options.obtuseAngleStartDeg) / (180 - options.obtuseAngleStartDeg)))
     const gapReduce = options.obtuseGapReduceMaxPx * obtuseRatio
     const liftReduce = options.obtuseLiftReduceMaxPx * obtuseRatio

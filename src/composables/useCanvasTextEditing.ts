@@ -239,6 +239,7 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
       color: string
       fontSize: number
       rotation: number
+      centerAlign: boolean
     }> = []
     for (const guide of canvasStore.guides) {
       if (guide.type !== 'text' || guide.visible === false) continue
@@ -251,7 +252,8 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
         guideId: guide.id,
         color: guide.color || '#231815',
         fontSize: getTextGuideFontSize(guide),
-        rotation: getTextGuideRotation(guide)
+        rotation: getTextGuideRotation(guide),
+        centerAlign: true
       })
     }
     return overlays

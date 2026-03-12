@@ -78,6 +78,15 @@ const targetGuide = computed(() => {
   return canvasStore.guides.find((g) => g.id === target.guideId) ?? null
 })
 
+const targetTopLevelItemKey = computed(() => {
+  if (targetShape.value) return canvasStore.getShapeTopLevelKey(targetShape.value.id)
+  if (targetGuide.value && !targetGuide.value.shapeId) {
+    return canvasStore.getGuideTopLevelKey(targetGuide.value.id)
+  }
+  return null
+})
+const isStandaloneGuideTarget = computed(() => !!targetGuide.value && !targetGuide.value.shapeId)
+
 const isShapeTarget = computed(() => props.target?.kind === 'shape')
 const isGuideTarget = computed(() => props.target?.kind === 'guide')
 const isShapeGuideItemTarget = computed(() => props.target?.kind === 'shape-guide-item')
@@ -380,8 +389,8 @@ function deleteShape() {
 }
 
 function reorder(direction: 'up' | 'down' | 'front' | 'back') {
-  if (!targetShape.value) return
-  canvasStore.reorderShape(targetShape.value.id, direction)
+  if (!targetTopLevelItemKey.value) return
+  canvasStore.reorderTopLevelItem(targetTopLevelItemKey.value, direction)
   closeMenu()
 }
 
@@ -927,6 +936,13 @@ onUnmounted(() => {
         </div>
 
         <div class="menu-sep"></div>
+        <template v-if="isStandaloneGuideTarget">
+          <button class="menu-btn" @click="reorder('up')">한 단계 앞으로</button>
+          <button class="menu-btn" @click="reorder('down')">한 단계 뒤로</button>
+          <button class="menu-btn" @click="reorder('front')">맨 앞으로</button>
+          <button class="menu-btn" @click="reorder('back')">맨 뒤로</button>
+          <div class="menu-sep"></div>
+        </template>
         <button class="menu-btn" @click="setGuideVisible(targetGuide?.visible === false)">표시/숨김</button>
         <button class="menu-btn text-red-600 hover:bg-red-50" @click="removeGuide">가이드 삭제</button>
       </template>

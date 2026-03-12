@@ -1121,7 +1121,7 @@ export function useAISketch() {
       }
 
       if (shapes.length === 0 && normalizedGuides.length === 0) {
-        throw new Error('No recognizable shape was found.')
+        throw new Error('도형을 인식하지 못했습니다. 더 명확하게 그려보거나 힌트를 추가해보세요.')
       }
 
       return {

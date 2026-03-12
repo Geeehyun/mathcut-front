@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import type { Shape, Guide, ShapeColor, ShapeGuideVisibility, ShapeGuideItemStyle } from '@/types'
 import { GRID_CONFIG } from '@/types'
 
-type CanvasSnapshot = { shapes: Shape[], guides: Guide[] }
+type CanvasSnapshot = { shapes: Shape[], guides: Guide[], topLevelOrder: string[] }
 const HISTORY_LIMIT = 100
 
 type AISketchImportPayload = {
@@ -35,6 +35,7 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   // 가이드 목록
   const guides = ref<Guide[]>([])
+  const topLevelOrder = ref<string[]>([])
 
   // 선택된 도형 ID
   const selectedShapeId = ref<string | null>(null)
@@ -52,6 +53,27 @@ export const useCanvasStore = defineStore('canvas', () => {
     guides.value.find(g => g.id === selectedGuideId.value) || null
   )
 
+  function getShapeTopLevelKey(id: string) {
+    return `shape:${id}`
+  }
+
+  function getGuideTopLevelKey(id: string) {
+    return `guide:${id}`
+  }
+
+  function syncTopLevelOrder() {
+    const validKeys = [
+      ...shapes.value.map((shape) => getShapeTopLevelKey(shape.id)),
+      ...guides.value.filter((guide) => !guide.shapeId).map((guide) => getGuideTopLevelKey(guide.id))
+    ]
+    const validSet = new Set(validKeys)
+    const next = topLevelOrder.value.filter((key) => validSet.has(key))
+    for (const key of validKeys) {
+      if (!next.includes(key)) next.push(key)
+    }
+    topLevelOrder.value = next
+  }
+
   // 히스토리 저장
   function saveHistory() {
     // 현재 위치 이후 히스토리 삭제
@@ -59,7 +81,8 @@ export const useCanvasStore = defineStore('canvas', () => {
     // 현재 상태 저장
     history.value.push({
       shapes: JSON.parse(JSON.stringify(shapes.value)),
-      guides: JSON.parse(JSON.stringify(guides.value))
+      guides: JSON.parse(JSON.stringify(guides.value)),
+      topLevelOrder: JSON.parse(JSON.stringify(topLevelOrder.value))
     })
     if (history.value.length > HISTORY_LIMIT) {
       history.value = history.value.slice(history.value.length - HISTORY_LIMIT)
@@ -71,6 +94,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function addShape(shape: Shape) {
     saveHistory()
     shapes.value.push(withCircleOppositePoint(shape))
+    syncTopLevelOrder()
   }
 
   // 도형 삭제
@@ -83,6 +107,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (selectedShapeId.value === id) {
       selectedShapeId.value = null
     }
+    syncTopLevelOrder()
   }
 
   // 도형 커스텀 색상 설정
@@ -198,6 +223,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (index === -1) return
     saveHistory()
     shapes.value[index] = withCircleOppositePoint(updater(shapes.value[index]))
+    syncTopLevelOrder()
   }
 
   function setShapeVisible(id: string, visible: boolean) {
@@ -220,6 +246,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     const [moved] = next.splice(fromIndex, 1)
     next.splice(clampedTo, 0, moved)
     shapes.value = next
+    syncTopLevelOrder()
   }
 
   function setShapePoint(id: string, pointIndex: number, point: { x: number, y: number, gridX: number, gridY: number }, recordHistory: boolean = true) {
@@ -316,6 +343,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (shapes.value.length > 0) {
       saveHistory()
       shapes.value.pop()
+      syncTopLevelOrder()
     }
   }
 
@@ -323,6 +351,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function addGuide(guide: Guide) {
     saveHistory()
     guides.value.push(guide)
+    syncTopLevelOrder()
   }
 
   function importAISketchResult(payload: AISketchImportPayload) {
@@ -334,6 +363,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     const mappedShapes = nextShapes.map((shape) => withCircleOppositePoint(shape))
     shapes.value = append ? [...shapes.value, ...mappedShapes] : mappedShapes
     guides.value = append ? [...guides.value, ...nextGuides] : [...nextGuides]
+    syncTopLevelOrder()
     selectedShapeId.value = null
     selectedGuideId.value = null
   }
@@ -348,6 +378,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (selectedGuideId.value === id) {
       selectedGuideId.value = null
     }
+    syncTopLevelOrder()
   }
 
   // 가이드 수정
@@ -358,6 +389,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       saveHistory()
     }
     guides.value[index] = updater(guides.value[index])
+    syncTopLevelOrder()
   }
 
   function setGuideVisible(id: string, visible: boolean) {
@@ -370,11 +402,54 @@ export const useCanvasStore = defineStore('canvas', () => {
     }
   }
 
+  function moveGuideToIndex(id: string, toIndex: number) {
+    const fromIndex = guides.value.findIndex((g) => g.id === id)
+    if (fromIndex === -1) return
+    const clampedTo = Math.max(0, Math.min(guides.value.length - 1, toIndex))
+    if (fromIndex === clampedTo) return
+    saveHistory()
+    const next = [...guides.value]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(clampedTo, 0, moved)
+    guides.value = next
+    syncTopLevelOrder()
+  }
+
+  function moveTopLevelItemToIndex(itemKey: string, toIndex: number) {
+    const fromIndex = topLevelOrder.value.findIndex((key) => key === itemKey)
+    if (fromIndex === -1) return
+    const clampedTo = Math.max(0, Math.min(topLevelOrder.value.length - 1, toIndex))
+    if (fromIndex === clampedTo) return
+    saveHistory()
+    const next = [...topLevelOrder.value]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(clampedTo, 0, moved)
+    topLevelOrder.value = next
+  }
+
+  function reorderTopLevelItem(itemKey: string, direction: 'up' | 'down' | 'front' | 'back') {
+    const index = topLevelOrder.value.findIndex((key) => key === itemKey)
+    if (index === -1) return
+    saveHistory()
+    const next = [...topLevelOrder.value]
+    if (direction === 'front') {
+      next.push(next.splice(index, 1)[0])
+    } else if (direction === 'back') {
+      next.unshift(next.splice(index, 1)[0])
+    } else if (direction === 'up' && index < next.length - 1) {
+      ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
+    } else if (direction === 'down' && index > 0) {
+      ;[next[index], next[index - 1]] = [next[index - 1], next[index]]
+    }
+    topLevelOrder.value = next
+  }
+
   // 마지막 가이드 삭제
   function removeLastGuide() {
     if (guides.value.length > 0) {
       saveHistory()
       guides.value.pop()
+      syncTopLevelOrder()
     }
   }
 
@@ -394,6 +469,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     saveHistory()
     shapes.value = []
     guides.value = []
+    topLevelOrder.value = []
     selectedShapeId.value = null
     selectedGuideId.value = null
   }
@@ -401,13 +477,18 @@ export const useCanvasStore = defineStore('canvas', () => {
   function getSnapshot(): CanvasSnapshot {
     return {
       shapes: JSON.parse(JSON.stringify(shapes.value)),
-      guides: JSON.parse(JSON.stringify(guides.value))
+      guides: JSON.parse(JSON.stringify(guides.value)),
+      topLevelOrder: JSON.parse(JSON.stringify(topLevelOrder.value))
     }
   }
 
   function loadSnapshot(snapshot: CanvasSnapshot) {
     shapes.value = JSON.parse(JSON.stringify(snapshot.shapes))
     guides.value = JSON.parse(JSON.stringify(snapshot.guides))
+    topLevelOrder.value = Array.isArray(snapshot.topLevelOrder)
+      ? JSON.parse(JSON.stringify(snapshot.topLevelOrder))
+      : []
+    syncTopLevelOrder()
     selectedShapeId.value = null
     selectedGuideId.value = null
     history.value = []
@@ -421,6 +502,8 @@ export const useCanvasStore = defineStore('canvas', () => {
       const state = history.value[historyIndex.value]
       shapes.value = JSON.parse(JSON.stringify(state.shapes))
       guides.value = JSON.parse(JSON.stringify(state.guides))
+      topLevelOrder.value = JSON.parse(JSON.stringify(state.topLevelOrder || []))
+      syncTopLevelOrder()
     }
   }
 
@@ -431,6 +514,8 @@ export const useCanvasStore = defineStore('canvas', () => {
       const state = history.value[historyIndex.value]
       shapes.value = JSON.parse(JSON.stringify(state.shapes))
       guides.value = JSON.parse(JSON.stringify(state.guides))
+      topLevelOrder.value = JSON.parse(JSON.stringify(state.topLevelOrder || []))
+      syncTopLevelOrder()
     }
   }
 
@@ -441,6 +526,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   return {
     shapes,
     guides,
+    topLevelOrder,
     selectedShapeId,
     selectedGuideId,
     selectedShape,
@@ -466,6 +552,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     importAISketchResult,
     updateGuide,
     setGuideVisible,
+    moveGuideToIndex,
+    moveTopLevelItemToIndex,
+    reorderTopLevelItem,
     removeGuide,
     removeLastGuide,
     selectShape,
@@ -474,6 +563,8 @@ export const useCanvasStore = defineStore('canvas', () => {
     getSnapshot,
     loadSnapshot,
     undo,
-    redo
+    redo,
+    getShapeTopLevelKey,
+    getGuideTopLevelKey
   }
 })

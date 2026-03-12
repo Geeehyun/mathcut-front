@@ -5,6 +5,7 @@ import type { Guide, Shape } from '@/types'
 export type CutCanvasData = {
   shapes: Shape[]
   guides: Guide[]
+  topLevelOrder?: string[]
 }
 
 export type CutListItem = {
