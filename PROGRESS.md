@@ -49,6 +49,19 @@
 
 > 최신순 정렬. 상세 내용은 `logs/` 참조.
 
+### 2026-03-12 (3차)
+
+#### [Claude] 인증 + 컷 관리 — 화면 골격 구현
+- `src/stores/auth.ts`: Pinia auth 스토어 (login/register/logout, JWT localStorage 저장)
+- `src/composables/useApi.ts`: fetch 래퍼 (Authorization 헤더 자동, 401 → /login)
+- `src/router/index.ts`: Vue Router 5 설정 (4개 라우트 + navigation guard)
+- `src/views/LoginView.vue`: 로그인/회원가입 탭 전환 화면 완성
+- `src/views/MyLibraryView.vue`: 내 컷 보관함 화면 골격 (빈상태/로딩/그리드, Codex API 연동 예정)
+- `src/views/EditorView.vue`: 유저 드롭다운(내 보관함/로그아웃) + 저장 버튼 추가
+- `src/App.vue`: `<RouterView>` 전환
+- `src/main.ts`: router 등록, `auth.restoreFromStorage()` 앱 시작 시 호출
+- `npm run build` 통과
+
 ### 2026-03-12 (2차)
 
 #### [Claude] AI 스케치 백엔드 API 연동 전환

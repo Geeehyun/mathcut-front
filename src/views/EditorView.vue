@@ -1,8 +1,12 @@
 ﻿<script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useToolStore } from '@/stores/tool'
 import { useCanvasStore } from '@/stores/canvas'
+import { useAuthStore } from '@/stores/auth'
+import { useCutStore } from '@/composables/useCutStore'
 import GridCanvas from '@/components/canvas/GridCanvas.vue'
+import AppSidebar from '@/components/layout/AppSidebar.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import ContextMenu from '@/components/ContextMenu.vue'
 import AISketchModal from '@/components/AISketchModal.vue'
@@ -11,8 +15,72 @@ import { GRID_CONFIG } from '@/types'
 import { isHeightDefaultVisibleType } from '@/constants/shapeRules'
 import { getShapeAutoAngleIndices } from '@/utils/shapeGuideLayout'
 
+const router = useRouter()
+const route = useRoute()
 const toolStore = useToolStore()
 const canvasStore = useCanvasStore()
+const auth = useAuthStore()
+const cutStore = useCutStore()
+
+// 유저 드롭다운
+const userDropdownOpen = ref(false)
+
+function toggleUserDropdown() {
+  userDropdownOpen.value = !userDropdownOpen.value
+}
+
+function closeUserDropdown() {
+  userDropdownOpen.value = false
+}
+
+async function handleLogout() {
+  closeUserDropdown()
+  await auth.logout()
+  await router.replace('/login')
+}
+
+function goToLibrary() {
+  router.push('/library')
+}
+
+const currentSavedCutId = ref<number | null>(null)
+const currentSavedCutTitle = ref('')
+const cutRequestLoading = ref(false)
+
+function getActiveSnapshot() {
+  cuts.value[currentCutIndex.value] = cloneSnapshot(canvasStore.getSnapshot())
+  return cloneSnapshot(cuts.value[currentCutIndex.value])
+}
+
+async function handleSave() {
+  if (!auth.isLoggedIn) {
+    router.push('/login')
+    return
+  }
+
+  const baseTitle = currentSavedCutTitle.value || '제목 없음'
+  const title = window.prompt('컷 제목을 입력하세요.', baseTitle)?.trim()
+  if (!title) return
+
+  try {
+    const snapshot = getActiveSnapshot()
+    const thumbnail = await gridCanvasRef.value?.createPngDataUrl?.(320, 180, { includeBackground: true })
+    if (currentSavedCutId.value === null) {
+      const { id } = await cutStore.saveCut(title, snapshot, thumbnail)
+      currentSavedCutId.value = id
+      currentSavedCutTitle.value = title
+      window.alert('저장되었습니다.')
+      await router.replace(`/editor/${id}`)
+      return
+    }
+
+    await cutStore.updateCut(currentSavedCutId.value, title, snapshot, thumbnail)
+    currentSavedCutTitle.value = title
+    window.alert('저장되었습니다.')
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '저장에 실패했습니다.')
+  }
+}
 const gridCanvasRef = ref<any>(null)
 
 // 마우스 좌표 (격자 단위)
@@ -23,6 +91,42 @@ type CutSnapshot = { shapes: Shape[], guides: Guide[] }
 const cuts = ref<CutSnapshot[]>([{ shapes: [], guides: [] }])
 const currentCutIndex = ref(0)
 const MAX_CANVAS_COUNT = 10
+
+function resetEditorWithSnapshot(snapshot: CutSnapshot) {
+  const nextSnapshot = cloneSnapshot(snapshot)
+  cuts.value = [nextSnapshot]
+  currentCutIndex.value = 0
+  canvasStore.loadSnapshot(cloneSnapshot(nextSnapshot))
+}
+
+async function loadSavedCut(cutIdParam: unknown) {
+  if (!cutIdParam) {
+    currentSavedCutId.value = null
+    currentSavedCutTitle.value = ''
+    resetEditorWithSnapshot({ shapes: [], guides: [] })
+    return
+  }
+
+  const cutId = Number(cutIdParam)
+  if (!Number.isFinite(cutId) || cutId <= 0) {
+    window.alert('잘못된 컷 경로입니다.')
+    await router.replace('/editor')
+    return
+  }
+
+  cutRequestLoading.value = true
+  try {
+    const cut = await cutStore.fetchCut(cutId)
+    currentSavedCutId.value = cut.id
+    currentSavedCutTitle.value = cut.title
+    resetEditorWithSnapshot(cut.canvasData)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '컷을 불러오지 못했습니다.')
+    await router.replace('/library')
+  } finally {
+    cutRequestLoading.value = false
+  }
+}
 
 const EXPORT_MIN_PX = 100
 const EXPORT_MAX_PX = 10000
@@ -236,31 +340,31 @@ function closeContextMenu() {
 
 // 도형 타입별 안내 문구
 const shapeInstructions: Partial<Record<ShapeType, string>> = {
-  rectangle: '두 개의 점을 대각선으로 클릭하세요',
-  triangle: '세 개의 점을 클릭하세요',
-  polygon: '점을 클릭하고, 첫 점을 다시 클릭하면 완성됩니다',
-  circle: '중심점과 경계점을 클릭하세요',
-  point: '위치를 클릭하세요',
-  'point-on-object': '도형/선 위의 위치를 클릭하세요',
-  segment: '두 점을 클릭하세요',
-  ray: '시작점과 방향점을 클릭하세요',
-  line: '두 점을 클릭하세요',
-  'angle-line': '두 선분의 끝점을 클릭하세요',
-  'triangle-equilateral': '밑변의 두 점을 클릭하세요',
-  'triangle-right': '밑변의 두 점을 찍고 세 번째 점으로 높이를 정하세요 (직각 보정)',
-  'triangle-isosceles': '밑변의 두 점을 찍고 세 번째 점으로 높이를 정하세요 (같은 변 길이 자동 고정)',
-  'triangle-free': '세 개의 점을 클릭하세요',
-  'rect-square': '한 변의 두 점을 클릭하세요',
-  'rect-rectangle': '대각선의 두 점을 클릭하세요',
-  'rect-trapezoid': '밑변의 두 점을 찍고 세 번째 점으로 윗변을 정하세요',
-  'rect-rhombus': '한 변의 두 점을 찍고 세 번째 점으로 기울기를 정하세요',
-  'rect-parallelogram': '세 점을 클릭하세요',
-  'rect-free': '네 개의 점을 클릭하세요',
-  'polygon-regular': '중심과 꼭짓점을 클릭하면 정다각형이 생성됩니다',
-  'free-shape': '점을 클릭하고, 첫 점을 다시 클릭하면 완성됩니다',
-  arrow: '시작점과 끝점을 클릭하세요',
-  'arrow-curve': '시작점과 끝점을 클릭하세요',
-  counter: '위치를 클릭하세요'
+  rectangle: '두 개의 점을 대각선으로 클릭하세요.',
+  triangle: '세 개의 점을 클릭하세요.',
+  polygon: '점을 클릭하고, 첫 점을 다시 클릭하면 완성됩니다.',
+  circle: '중심점과 경계점을 클릭하세요.',
+  point: '위치를 클릭하세요.',
+  'point-on-object': '도형/선 위의 위치를 클릭하세요.',
+  segment: '두 점을 클릭하세요.',
+  ray: '시작점과 방향점을 클릭하세요.',
+  line: '두 점을 클릭하세요.',
+  'angle-line': '두 선분의 끝점을 클릭하세요.',
+  'triangle-equilateral': '밑변의 두 점을 클릭하세요.',
+  'triangle-right': '밑변의 두 점을 찍고 세 번째 점으로 높이를 정하세요 (직각 보정).',
+  'triangle-isosceles': '밑변의 두 점을 찍고 세 번째 점으로 높이를 정하세요 (같은 변 길이 자동 고정).',
+  'triangle-free': '세 개의 점을 클릭하세요.',
+  'rect-square': '한 변의 두 점을 클릭하세요.',
+  'rect-rectangle': '대각선의 두 점을 클릭하세요.',
+  'rect-trapezoid': '밑변의 두 점을 찍고 세 번째 점으로 윗변을 정하세요.',
+  'rect-rhombus': '한 변의 두 점을 찍고 세 번째 점으로 기울기를 정하세요.',
+  'rect-parallelogram': '세 점을 클릭하세요.',
+  'rect-free': '네 개의 점을 클릭하세요.',
+  'polygon-regular': '중심과 꼭짓점을 클릭하면 정다각형이 생성됩니다.',
+  'free-shape': '점을 클릭하고, 첫 점을 다시 클릭하면 완성됩니다.',
+  arrow: '시작점과 끝점을 클릭하세요.',
+  'arrow-curve': '시작점과 끝점을 클릭하세요.',
+  counter: '위치를 클릭하세요.'
 }
 
 // 도형 타입별 이름
@@ -413,14 +517,14 @@ const instruction = computed(() => {
   }
 
   if (toolStore.mode === 'shape') {
-    return shapeInstructions[toolStore.shapeType] ?? '도형 도구를 선택하세요'
+    return shapeInstructions[toolStore.shapeType] ?? '도형 도구를 선택하세요.'
   }
 
   const instructions: Record<GuideType, string> = {
-    length: '도형 변을 드래그해 생성하고, 생성된 곡선을 클릭해 방향을 바꿉니다',
-    text: '배치할 위치를 클릭하세요',
-    angle: '도형의 꼭짓점을 클릭하면 해당 각도가 표시됩니다',
-    'blank-box': 'AI 스케치에서 생성되는 외부 빈칸 박스입니다'
+    length: '도형 변을 드래그해 생성하고, 생성된 곡선을 클릭해 방향을 바꿉니다.',
+    text: '배치할 위치를 클릭하세요.',
+    angle: '도형의 꼭짓점을 클릭하면 해당 각도가 표시됩니다.',
+    'blank-box': 'AI 스케치에서 생성되는 외부 빈칸 박스입니다.'
   }
   return instructions[toolStore.guideType]
 })
@@ -771,11 +875,20 @@ function handleKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
+  loadSavedCut(route.params.cutId)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
+
+watch(
+  () => route.params.cutId,
+  (cutId, prevCutId) => {
+    if (cutId === prevCutId) return
+    loadSavedCut(cutId)
+  }
+)
 </script>
 
 <template>
@@ -783,89 +896,160 @@ onUnmounted(() => {
   <div class="absolute inset-0 flex flex-col bg-gray-950">
 
     <!-- ===== 상단 크롬 바 (h-10) ===== -->
-    <div class="shrink-0 h-10 bg-gray-900 border-b border-gray-800 flex items-center px-3 gap-3 z-30">
+    <div class="relative shrink-0 h-10 bg-gray-900 border-b border-gray-800 flex items-center px-3 z-50">
 
-      <!-- 로고 -->
-      <div class="flex items-center gap-1.5 mr-2">
-        <div class="w-6 h-6 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-md flex items-center justify-center">
-          <span class="text-white text-xs font-bold">M</span>
+      <!-- ── 왼쪽: 로고 + 컷 탐색 + 줌 ── -->
+      <div class="flex items-center gap-2 min-w-0">
+
+        <!-- 로고 -->
+        <div class="flex items-center gap-1.5 mr-1 shrink-0">
+          <div class="w-5 h-5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded flex items-center justify-center">
+            <span class="text-white text-[10px] font-bold">M</span>
+          </div>
+          <span class="text-xs font-semibold text-gray-300 tracking-wide">MathCut</span>
         </div>
-        <span class="text-sm font-semibold text-gray-200">MathCut</span>
+
+        <div class="w-px h-4 bg-gray-700 shrink-0"></div>
+
+        <!-- 컷 탐색 -->
+        <div class="flex items-center gap-0.5 shrink-0">
+          <button
+            class="chrome-btn w-6 h-6 flex items-center justify-center text-[10px]"
+            :disabled="currentCutIndex === 0"
+            :class="currentCutIndex === 0 ? 'opacity-25 cursor-not-allowed' : ''"
+            @click="currentCutIndex > 0 && (syncCurrentCut(), currentCutIndex--, canvasStore.loadSnapshot(cloneSnapshot(cuts[currentCutIndex])))"
+            title="이전 컷"
+          >‹</button>
+          <span class="text-[11px] text-gray-400 w-10 text-center tabular-nums">{{ currentCutIndex + 1 }}/{{ cuts.length }}</span>
+          <button
+            class="chrome-btn w-6 h-6 flex items-center justify-center text-[10px]"
+            :disabled="currentCutIndex >= cuts.length - 1"
+            :class="currentCutIndex >= cuts.length - 1 ? 'opacity-25 cursor-not-allowed' : ''"
+            @click="currentCutIndex < cuts.length - 1 && (syncCurrentCut(), currentCutIndex++, canvasStore.loadSnapshot(cloneSnapshot(cuts[currentCutIndex])))"
+            title="다음 컷"
+          >›</button>
+        </div>
+
+        <!-- 컷 조작 -->
+        <div class="flex items-center gap-0.5 shrink-0">
+          <button class="chrome-btn px-1.5 h-6 text-[11px]" @click="addCut" title="컷 추가">+</button>
+          <button class="chrome-btn px-1.5 h-6 text-[11px]" @click="duplicateCut" title="컷 복제">⧉</button>
+          <button class="chrome-btn px-1.5 h-6 text-[11px] hover:text-red-400" @click="deleteCut" title="컷 삭제">✕</button>
+        </div>
+
+        <div class="w-px h-4 bg-gray-700 shrink-0"></div>
+
+        <!-- 줌 -->
+        <div class="flex items-center gap-0.5 shrink-0">
+          <button
+            class="chrome-btn w-6 h-6 flex items-center justify-center text-sm font-light"
+            :disabled="toolStore.zoom <= 100"
+            :class="toolStore.zoom <= 100 ? 'opacity-25 cursor-not-allowed' : ''"
+            @click="toolStore.zoomOut"
+            title="축소"
+          >−</button>
+          <span class="text-[11px] text-gray-400 w-9 text-center tabular-nums">{{ toolStore.zoom }}%</span>
+          <button
+            class="chrome-btn w-6 h-6 flex items-center justify-center text-sm font-light"
+            :disabled="toolStore.zoom >= 200"
+            :class="toolStore.zoom >= 200 ? 'opacity-25 cursor-not-allowed' : ''"
+            @click="toolStore.zoomIn"
+            title="확대"
+          >+</button>
+        </div>
       </div>
 
-      <div class="w-px h-5 bg-gray-700"></div>
-
-      <!-- 컷 관리 -->
-      <div class="flex items-center gap-1">
-        <button
-          class="chrome-btn"
-          :disabled="currentCutIndex === 0"
-          :class="currentCutIndex === 0 ? 'opacity-30 cursor-not-allowed' : ''"
-          @click="currentCutIndex > 0 && (syncCurrentCut(), currentCutIndex--, canvasStore.loadSnapshot(cloneSnapshot(cuts[currentCutIndex])))"
-          title="이전 컷"
-        >◀</button>
-        <span class="text-xs text-gray-300 min-w-[3rem] text-center">{{ currentCutIndex + 1 }} / {{ cuts.length }}</span>
-        <button
-          class="chrome-btn"
-          :disabled="currentCutIndex >= cuts.length - 1"
-          :class="currentCutIndex >= cuts.length - 1 ? 'opacity-30 cursor-not-allowed' : ''"
-          @click="currentCutIndex < cuts.length - 1 && (syncCurrentCut(), currentCutIndex++, canvasStore.loadSnapshot(cloneSnapshot(cuts[currentCutIndex])))"
-          title="다음 컷"
-        >▶</button>
-      </div>
-
-      <div class="flex items-center gap-0.5">
-        <button class="chrome-btn px-2 text-xs" @click="addCut" title="컷 추가">+</button>
-        <button class="chrome-btn px-2 text-xs" @click="duplicateCut" title="컷 복제">⧉</button>
-        <button class="chrome-btn px-2 text-xs hover:text-red-400" @click="deleteCut" title="컷 삭제">✕</button>
-      </div>
-
-      <div class="w-px h-5 bg-gray-700"></div>
-
-      <!-- 줄 -->
-      <div class="flex items-center gap-1">
-        <button
-          class="chrome-btn"
-          :disabled="toolStore.zoom <= 100"
-          :class="toolStore.zoom <= 100 ? 'opacity-30 cursor-not-allowed' : ''"
-          @click="toolStore.zoomOut"
-          title="축소"
-        >-</button>
-        <span class="text-xs text-gray-300 min-w-[2.5rem] text-center">{{ toolStore.zoom }}%</span>
-        <button
-          class="chrome-btn"
-          :disabled="toolStore.zoom >= 200"
-          :class="toolStore.zoom >= 200 ? 'opacity-30 cursor-not-allowed' : ''"
-          @click="toolStore.zoomIn"
-          title="확대"
-        >+</button>
-      </div>
-
-      <div class="w-px h-5 bg-gray-700"></div>
-
-      <div class="flex items-center gap-1">
-        <button
-          class="text-xs bg-violet-600 hover:bg-violet-500 text-white px-3 py-1 rounded transition font-medium"
-          @click="aiSketchModalOpen = true"
-        >AI 스케치</button>
-      </div>
-
-      <!-- 내보내기 -->
-      <div class="flex items-center gap-1">
-        <button
-          class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition font-medium"
-          @click="openExportModal"
-        >내보내기</button>
-      </div>
-
-      <!-- 스페이서 -->
+      <!-- ── 스페이서 ── -->
       <div class="flex-1"></div>
 
-      <!-- 유저 아바타 -->
-      <div class="w-7 h-7 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full flex items-center justify-center cursor-pointer hover:opacity-80 transition">
-        <span class="text-white text-xs font-medium">U</span>
+      <!-- ── 오른쪽: 액션 버튼 + 유저 ── -->
+      <div class="flex items-center gap-1.5">
+
+        <!-- AI 스케치 -->
+        <button
+          class="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium
+                 bg-violet-500/15 text-violet-300 border border-violet-500/25
+                 hover:bg-violet-500/25 hover:text-violet-200 hover:border-violet-400/40
+                 transition-all duration-150"
+          @click="aiSketchModalOpen = true"
+        >
+          <span class="text-[10px]">✦</span> AI 스케치
+        </button>
+
+        <!-- 내보내기 -->
+        <button
+          class="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium
+                 bg-gray-700/60 text-gray-300 border border-gray-600/50
+                 hover:bg-gray-700 hover:text-gray-100 hover:border-gray-500
+                 transition-all duration-150"
+          @click="openExportModal"
+        >
+          <span class="text-[10px]">↗</span> 내보내기
+        </button>
+
+        <div class="w-px h-4 bg-gray-700"></div>
+
+        <!-- 저장 -->
+        <button
+          class="h-6 px-3 rounded-md text-[11px] font-semibold
+                 bg-emerald-500 text-white
+                 hover:bg-emerald-400
+                 disabled:opacity-50 disabled:cursor-wait
+                 transition-all duration-150 shadow-sm shadow-emerald-500/20"
+          :disabled="cutRequestLoading"
+          @click="handleSave"
+          title="내 보관함에 저장"
+        >{{ cutRequestLoading ? '로딩 중…' : '저장' }}</button>
+
+        <!-- 비로그인 -->
+        <button
+          v-if="!auth.isLoggedIn"
+          class="h-6 px-2.5 rounded-md text-[11px] font-medium
+                 text-gray-400 border border-gray-700
+                 hover:text-gray-200 hover:border-gray-500
+                 transition-all duration-150"
+          @click="router.push('/login')"
+        >로그인</button>
+
+        <!-- 로그인: 유저 아바타 -->
+        <div v-else class="relative">
+          <button
+            class="w-6 h-6 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full
+                   flex items-center justify-center
+                   hover:opacity-80 transition ring-2 ring-transparent hover:ring-emerald-400/30"
+            @click="toggleUserDropdown"
+            title="사용자 메뉴"
+          >
+            <span class="text-white text-[10px] font-semibold">{{ auth.nickname?.charAt(0).toUpperCase() ?? 'U' }}</span>
+          </button>
+
+          <div
+            v-if="userDropdownOpen"
+            class="absolute right-0 top-8 w-40 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl shadow-black/40 py-1 z-50"
+            @click.stop
+          >
+            <div class="px-3 py-2 border-b border-gray-700/60">
+              <p class="text-[11px] font-semibold text-gray-200 truncate">{{ auth.nickname }}</p>
+              <p class="text-[10px] text-gray-500">로그인됨</p>
+            </div>
+            <button
+              class="w-full text-left px-3 py-1.5 text-[11px] text-gray-300 hover:bg-gray-700/60 transition"
+              @click="goToLibrary(); closeUserDropdown()"
+            >내 보관함</button>
+            <button
+              class="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-gray-700/60 transition"
+              @click="handleLogout"
+            >로그아웃</button>
+          </div>
+        </div>
       </div>
+
+      <!-- 드롭다운 외부 클릭 닫기 -->
+      <div v-if="userDropdownOpen" class="fixed inset-0 z-40" @click="closeUserDropdown"></div>
     </div>
+
+    <!-- 좌측 도구 사이드바 (크롬 바/상태 바 제외, absolute) -->
+    <AppSidebar />
 
     <!-- ===== 메인 영역 (캔버스 + 우측 패널) ===== -->
     <div class="flex-1 relative overflow-hidden">

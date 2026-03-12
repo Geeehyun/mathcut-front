@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import AppLayout from './components/layout/AppLayout.vue'
-import EditorView from './views/EditorView.vue'
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
-  <AppLayout :noChrome="true">
-    <EditorView />
-  </AppLayout>
+  <RouterView />
 </template>
