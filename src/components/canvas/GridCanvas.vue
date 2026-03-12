@@ -32,7 +32,7 @@ import { GRID_CONFIG, STYLE_COLORS } from '@/types'
 import type { Point, Shape, ShapeGuideItemStyle } from '@/types'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { formatMathText } from '@/utils/mathText'
-import { renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
+import { formatTextGuideDisplayText, renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
 import { createLatexCanvasSprite } from '@/utils/latexCanvas'
 import { useCanvasExport } from '@/composables/useCanvasExport'
 import { useCanvasInteraction } from '@/composables/useCanvasInteraction'
@@ -613,6 +613,17 @@ function getBlankBoxSuffixPos(guide: { points: Point[], fontSize?: number, blank
   return getGuideBlankTextPos(rect, fontSize, getBlankBoxUnitMode(guide) === 'cm' ? GRID_CONFIG.size / 2 : 4)
 }
 
+function getBlankBoxSuffixLatexPos(guide: { points: Point[], fontSize?: number, blankUnitMode?: 'none' | 'cm' | 'angle' }): { x: number, y: number } {
+  const pos = getBlankBoxSuffixPos(guide)
+  if (getBlankBoxUnitMode(guide) === 'angle') {
+    return {
+      x: pos.x - 3,
+      y: pos.y - 3
+    }
+  }
+  return pos
+}
+
 function getTextGuideRotation(guide: { rotation?: number }): number {
   return Number.isFinite(guide.rotation) ? Number(guide.rotation) : 0
 }
@@ -623,6 +634,16 @@ function isTextGuideHighlighted(guideId: string): boolean {
 
 function isBlankBoxGuideHighlighted(guideId: string): boolean {
   return hoveredBlankBoxGuideId.value === guideId || canvasStore.selectedGuideId === guideId
+}
+
+function getBlankGuideHighlightConfig(highlighted: boolean) {
+  return {
+    stroke: highlighted ? '#38BDF8' : BLANK_BORDER_COLOR,
+    strokeWidth: highlighted ? BLANK_BORDER_WIDTH_PX + 1 : BLANK_BORDER_WIDTH_PX,
+    shadowColor: highlighted ? '#0EA5E9' : 'transparent',
+    shadowBlur: highlighted ? 10 : 0,
+    shadowOpacity: highlighted ? 0.45 : 0
+  }
 }
 
 function handleTextGuideOverlayContextMenu(guideId: string, e: MouseEvent) {
@@ -2592,6 +2613,37 @@ const latexShapeGuideOverlays = computed(() => {
   return overlays
 })
 
+const latexBlankBoxGuideOverlays = computed(() => {
+  const overlays: Array<{
+    key: string
+    x: number
+    y: number
+    html: string
+    guideId: string
+    color: string
+    fontSize: number
+  }> = []
+
+  for (const guide of canvasStore.guides) {
+    if (guide.type !== 'blank-box' || guide.visible === false) continue
+    const unitMode = getBlankBoxUnitMode(guide)
+    const html = toBlankBoxSuffixLatex(unitMode)
+    if (!html) continue
+    const pos = getBlankBoxSuffixLatexPos(guide)
+    overlays.push({
+      key: `${guide.id}-suffix`,
+      x: pos.x,
+      y: pos.y,
+      html: renderLatexLikeHtml(html, true),
+      guideId: guide.id,
+      color: DEFAULT_TEXT_COLOR,
+      fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE
+    })
+  }
+
+  return overlays
+})
+
 type RuntimeLatexSpriteState = Awaited<ReturnType<typeof createLatexCanvasSprite>> & {
   signature: string
 }
@@ -2621,6 +2673,13 @@ const runtimeShapeLatexEntries = computed<RuntimeLatexCanvasEntry[]>(() => [
   })),
   ...latexShapeGuideOverlays.value.map((overlay) => ({
     key: `shape:${overlay.key}`,
+    html: overlay.html,
+    color: overlay.color,
+    fontSize: overlay.fontSize,
+    fontFamily: DEFAULT_TEXT_FONT_FAMILY
+  })),
+  ...latexBlankBoxGuideOverlays.value.map((overlay) => ({
+    key: `guide:${overlay.key}`,
     html: overlay.html,
     color: overlay.color,
     fontSize: overlay.fontSize,
@@ -2673,6 +2732,10 @@ const latexShapeGuideOverlayMap = computed(() => {
   return new Map(latexShapeGuideOverlays.value.map((overlay) => [overlay.key, overlay]))
 })
 
+const latexBlankBoxGuideOverlayMap = computed(() => {
+  return new Map(latexBlankBoxGuideOverlays.value.map((overlay) => [overlay.key, overlay]))
+})
+
 function getRuntimeTextGuideLatexSprite(guideId: string) {
   const overlay = latexTextGuideOverlayMap.value.get(guideId)
   const sprite = runtimeShapeLatexSprites.value[`text:${guideId}`]
@@ -2696,6 +2759,16 @@ function getRuntimePointLatexSprite(shapeId: string, pointIndex: number) {
 function getRuntimeShapeGuideLatexSprite(overlayKey: string) {
   const overlay = latexShapeGuideOverlayMap.value.get(overlayKey)
   const sprite = runtimeShapeLatexSprites.value[`shape:${overlayKey}`]
+  if (!overlay || !sprite) return null
+  return {
+    overlay,
+    sprite
+  }
+}
+
+function getRuntimeBlankBoxGuideLatexSprite(guideId: string) {
+  const overlay = latexBlankBoxGuideOverlayMap.value.get(`${guideId}-suffix`)
+  const sprite = runtimeShapeLatexSprites.value[`guide:${guideId}-suffix`]
   if (!overlay || !sprite) return null
   return {
     overlay,
@@ -2733,6 +2806,10 @@ function getRuntimeTextGuideImageConfig(guideId: string) {
     offsetY: snapTextValue((overlay.fontSize * 0.45) + sprite.insetY),
     rotation: overlay.rotation
   }
+}
+
+function getTextGuideDisplayText(text: string): string {
+  return formatTextGuideDisplayText(text)
 }
 
 function shouldRenderCanvasTextGuide(): boolean {
@@ -2892,17 +2969,13 @@ defineExpose({ exportImage, createPngDataUrl })
               :config="{
                 x: getShapeGuideBlankRect(shape, 'pointName', 0).x,
                 y: getShapeGuideBlankRect(shape, 'pointName', 0).y,
-                width: getShapeGuideBlankRect(shape, 'pointName', 0).width,
-                height: getShapeGuideBlankRect(shape, 'pointName', 0).height,
-                cornerRadius: getShapeGuideBlankRect(shape, 'pointName', 0).cornerRadius,
-                stroke: BLANK_BORDER_COLOR,
-                strokeWidth: BLANK_BORDER_WIDTH_PX,
-                fill: '#FFFFFF',
-                listening: true,
-                shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 0) ? '#38BDF8' : 'transparent',
-                shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 8 : 0,
-                shadowOpacity: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 0.45 : 0
-              }"
+                    width: getShapeGuideBlankRect(shape, 'pointName', 0).width,
+                    height: getShapeGuideBlankRect(shape, 'pointName', 0).height,
+                    cornerRadius: getShapeGuideBlankRect(shape, 'pointName', 0).cornerRadius,
+                    fill: '#FFFFFF',
+                    listening: true,
+                    ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'pointName', 0))
+                  }"
               @mouseenter="handleGuideTextMouseEnter(shape.id, 'pointName', 0)"
               @mouseleave="handleGuideTextMouseLeave"
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', 0, $event)"
@@ -3110,13 +3183,9 @@ defineExpose({ exportImage, createPngDataUrl })
                   width: getShapeGuideBlankRect(shape, 'length', pIndex).width,
                   height: getShapeGuideBlankRect(shape, 'length', pIndex).height,
                   cornerRadius: getShapeGuideBlankRect(shape, 'length', pIndex).cornerRadius,
-                  stroke: BLANK_BORDER_COLOR,
-                  strokeWidth: BLANK_BORDER_WIDTH_PX,
                   fill: '#FFFFFF',
                   listening: true,
-                  shadowColor: isGuideTextHighlighted(shape.id, 'length', pIndex) ? '#38BDF8' : 'transparent',
-                  shadowBlur: isGuideTextHighlighted(shape.id, 'length', pIndex) ? 8 : 0,
-                  shadowOpacity: isGuideTextHighlighted(shape.id, 'length', pIndex) ? 0.45 : 0
+                  ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'length', pIndex))
                 }"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'length', pIndex)"
                 @mouseleave="handleGuideTextMouseLeave"
@@ -3240,13 +3309,9 @@ defineExpose({ exportImage, createPngDataUrl })
                   width: getShapeGuideBlankRect(shape, 'height', 0).width,
                   height: getShapeGuideBlankRect(shape, 'height', 0).height,
                   cornerRadius: getShapeGuideBlankRect(shape, 'height', 0).cornerRadius,
-                  stroke: BLANK_BORDER_COLOR,
-                  strokeWidth: BLANK_BORDER_WIDTH_PX,
                   fill: '#FFFFFF',
                   listening: true,
-                  shadowColor: isGuideTextHighlighted(shape.id, 'height', 0) ? '#38BDF8' : 'transparent',
-                  shadowBlur: isGuideTextHighlighted(shape.id, 'height', 0) ? 8 : 0,
-                  shadowOpacity: isGuideTextHighlighted(shape.id, 'height', 0) ? 0.45 : 0
+                  ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'height', 0))
                 }"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'height', 0)"
                 @mouseleave="handleGuideTextMouseLeave"
@@ -3327,13 +3392,9 @@ defineExpose({ exportImage, createPngDataUrl })
                   width: getShapeGuideBlankRect(shape, 'angle', angleIndex).width,
                   height: getShapeGuideBlankRect(shape, 'angle', angleIndex).height,
                   cornerRadius: getShapeGuideBlankRect(shape, 'angle', angleIndex).cornerRadius,
-                  stroke: BLANK_BORDER_COLOR,
-                  strokeWidth: BLANK_BORDER_WIDTH_PX,
                   fill: '#FFFFFF',
                   listening: true,
-                  shadowColor: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? '#38BDF8' : 'transparent',
-                  shadowBlur: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? 8 : 0,
-                  shadowOpacity: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? 0.45 : 0
+                  ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'angle', angleIndex))
                 }"
                 @mouseenter="handleGuideTextMouseEnter(shape.id, 'angle', angleIndex)"
                 @mouseleave="handleGuideTextMouseLeave"
@@ -3382,13 +3443,9 @@ defineExpose({ exportImage, createPngDataUrl })
                     width: getShapeGuideBlankRect(shape, 'pointName', pIndex).width,
                     height: getShapeGuideBlankRect(shape, 'pointName', pIndex).height,
                     cornerRadius: getShapeGuideBlankRect(shape, 'pointName', pIndex).cornerRadius,
-                    stroke: BLANK_BORDER_COLOR,
-                    strokeWidth: BLANK_BORDER_WIDTH_PX,
                     fill: '#FFFFFF',
                     listening: true,
-                    shadowColor: isGuideTextHighlighted(shape.id, 'pointName', pIndex) ? '#38BDF8' : 'transparent',
-                    shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', pIndex) ? 8 : 0,
-                    shadowOpacity: isGuideTextHighlighted(shape.id, 'pointName', pIndex) ? 0.45 : 0
+                    ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'pointName', pIndex))
                   }"
                   @mouseenter="handleGuideTextMouseEnter(shape.id, 'pointName', pIndex)"
                   @mouseleave="handleGuideTextMouseLeave"
@@ -3502,13 +3559,9 @@ defineExpose({ exportImage, createPngDataUrl })
                 width: getShapeGuideBlankRect(shape, 'pointName', 0).width,
                 height: getShapeGuideBlankRect(shape, 'pointName', 0).height,
                 cornerRadius: getShapeGuideBlankRect(shape, 'pointName', 0).cornerRadius,
-                stroke: BLANK_BORDER_COLOR,
-                strokeWidth: BLANK_BORDER_WIDTH_PX,
                 fill: '#FFFFFF',
                 listening: true,
-                shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 0) ? '#38BDF8' : 'transparent',
-                shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 8 : 0,
-                shadowOpacity: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 0.45 : 0
+                ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'pointName', 0))
               }"
               @mouseenter="handleGuideTextMouseEnter(shape.id, 'pointName', 0)"
               @mouseleave="handleGuideTextMouseLeave"
@@ -3543,13 +3596,9 @@ defineExpose({ exportImage, createPngDataUrl })
                 width: getShapeGuideBlankRect(shape, 'pointName', 1).width,
                 height: getShapeGuideBlankRect(shape, 'pointName', 1).height,
                 cornerRadius: getShapeGuideBlankRect(shape, 'pointName', 1).cornerRadius,
-                stroke: BLANK_BORDER_COLOR,
-                strokeWidth: BLANK_BORDER_WIDTH_PX,
                 fill: '#FFFFFF',
                 listening: true,
-                shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 1) ? '#38BDF8' : 'transparent',
-                shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 1) ? 8 : 0,
-                shadowOpacity: isGuideTextHighlighted(shape.id, 'pointName', 1) ? 0.45 : 0
+                ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'pointName', 1))
               }"
               @mouseenter="handleGuideTextMouseEnter(shape.id, 'pointName', 1)"
               @mouseleave="handleGuideTextMouseLeave"
@@ -3584,13 +3633,9 @@ defineExpose({ exportImage, createPngDataUrl })
                 width: getShapeGuideBlankRect(shape, 'pointName', 2).width,
                 height: getShapeGuideBlankRect(shape, 'pointName', 2).height,
                 cornerRadius: getShapeGuideBlankRect(shape, 'pointName', 2).cornerRadius,
-                stroke: BLANK_BORDER_COLOR,
-                strokeWidth: BLANK_BORDER_WIDTH_PX,
                 fill: '#FFFFFF',
                 listening: true,
-                shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 2) ? '#38BDF8' : 'transparent',
-                shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 2) ? 8 : 0,
-                shadowOpacity: isGuideTextHighlighted(shape.id, 'pointName', 2) ? 0.45 : 0
+                ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'pointName', 2))
               }"
               @mouseenter="handleGuideTextMouseEnter(shape.id, 'pointName', 2)"
               @mouseleave="handleGuideTextMouseLeave"
@@ -3665,13 +3710,9 @@ defineExpose({ exportImage, createPngDataUrl })
                 width: getShapeGuideBlankRect(shape, 'length', 0).width,
                 height: getShapeGuideBlankRect(shape, 'length', 0).height,
                 cornerRadius: getShapeGuideBlankRect(shape, 'length', 0).cornerRadius,
-                stroke: BLANK_BORDER_COLOR,
-                strokeWidth: BLANK_BORDER_WIDTH_PX,
                 fill: '#FFFFFF',
                 listening: true,
-                shadowColor: isGuideTextHighlighted(shape.id, 'length', 0) ? '#38BDF8' : 'transparent',
-                shadowBlur: isGuideTextHighlighted(shape.id, 'length', 0) ? 8 : 0,
-                shadowOpacity: isGuideTextHighlighted(shape.id, 'length', 0) ? 0.45 : 0
+                ...getBlankGuideHighlightConfig(isGuideTextHighlighted(shape.id, 'length', 0))
               }"
               @mouseenter="handleGuideTextMouseEnter(shape.id, 'length', 0)"
               @mouseleave="handleGuideTextMouseLeave"
@@ -3861,8 +3902,19 @@ defineExpose({ exportImage, createPngDataUrl })
                     shadowOpacity: isBlankBoxGuideHighlighted(guide.id) ? 0.45 : 0
                   }"
                 />
+                <v-image
+                  v-if="getRuntimeBlankBoxGuideLatexSprite(guide.id) && getBlankBoxSuffixText(guide)"
+                  :config="{
+                    image: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.image,
+                    x: getRuntimeLatexImageX(getRuntimeBlankBoxGuideLatexSprite(guide.id)!.overlay, getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite),
+                    y: getRuntimeLatexImageY(getRuntimeBlankBoxGuideLatexSprite(guide.id)!.overlay, getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite),
+                    width: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.width,
+                    height: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.height,
+                    listening: false
+                  }"
+                />
                 <v-text
-                  v-if="getBlankBoxSuffixText(guide)"
+                  v-else-if="getBlankBoxSuffixText(guide)"
                   :config="{
                     x: getBlankBoxSuffixPos(guide).x,
                     y: getBlankBoxSuffixPos(guide).y,
@@ -3907,7 +3959,7 @@ defineExpose({ exportImage, createPngDataUrl })
                     name: getGuideNodeName(guide.id),
                     x: guide.points[1].x + 24,
                     y: guide.points[1].y - 18,
-                    text: formatMathText(guide.text || ''),
+                    text: formatMathText(getTextGuideDisplayText(guide.text || '')),
                     fontSize: guide.fontSize || DEFAULT_TEXT_FONT_SIZE,
                     fontFamily: DEFAULT_TEXT_FONT_FAMILY,
                     fill: guide.color || ANGLE_GUIDE_DEFAULT_COLOR,
@@ -4042,14 +4094,14 @@ defineExpose({ exportImage, createPngDataUrl })
                 name: getGuideNodeName(guide.id),
                 x: getTextGuideAnchor(guide).x,
                 y: getTextGuideAnchor(guide).y,
-                text: formatMathText(guide.text || 'A'),
+                text: formatMathText(getTextGuideDisplayText(guide.text || 'A')),
                 fontSize: getTextGuideFontSize(guide),
                 fontFamily: DEFAULT_TEXT_FONT_FAMILY,
                 fill: guide.color || DEFAULT_TEXT_COLOR,
                 fontStyle: 'normal',
                 align: 'center',
                 rotation: getTextGuideRotation(guide),
-                offsetX: getTextWidthPx(formatMathText(guide.text || 'A'), getTextGuideFontSize(guide)) * 0.5,
+                offsetX: getTextWidthPx(formatMathText(getTextGuideDisplayText(guide.text || 'A')), getTextGuideFontSize(guide)) * 0.5,
                 offsetY: getTextGuideFontSize(guide) * 0.45,
                 shadowColor: isTextGuideHighlighted(guide.id) ? '#38BDF8' : 'transparent',
                 shadowBlur: isTextGuideHighlighted(guide.id) ? 10 : 0,
@@ -4082,8 +4134,19 @@ defineExpose({ exportImage, createPngDataUrl })
                 shadowOpacity: isBlankBoxGuideHighlighted(guide.id) ? 0.45 : 0
               }"
             />
+            <v-image
+              v-if="getRuntimeBlankBoxGuideLatexSprite(guide.id) && getBlankBoxSuffixText(guide)"
+              :config="{
+                image: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimeBlankBoxGuideLatexSprite(guide.id)!.overlay, getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimeBlankBoxGuideLatexSprite(guide.id)!.overlay, getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite),
+                width: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.width,
+                height: getRuntimeBlankBoxGuideLatexSprite(guide.id)!.sprite.height,
+                listening: false
+              }"
+            />
             <v-text
-              v-if="getBlankBoxSuffixText(guide)"
+              v-else-if="getBlankBoxSuffixText(guide)"
               :config="{
                 x: getBlankBoxSuffixPos(guide).x,
                 y: getBlankBoxSuffixPos(guide).y,

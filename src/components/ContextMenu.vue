@@ -895,7 +895,7 @@ onUnmounted(() => {
 
         <div class="px-2 py-2 space-y-2">
           <p v-if="targetGuide?.type === 'blank-box' && guideItemTypeLabel" class="text-[11px] text-gray-500">타입: {{ guideItemTypeLabel }}</p>
-          <div>
+          <div v-if="targetGuide?.type !== 'blank-box'">
             <p class="text-xs text-gray-500 mb-1">색상</p>
             <div class="flex items-center flex-wrap gap-1.5">
               <button v-for="color in STROKE_PALETTE" :key="`guide-color-${color.id}`" class="w-5 h-5 rounded-full border transition hover:scale-110" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setGuideColor(color.hex)"></button>
@@ -925,7 +925,7 @@ onUnmounted(() => {
               <button class="px-2 py-0.5 border rounded" @click="guideFontSizeDraft = Math.min(72, guideFontSizeDraft + 1); setGuideFontSize(guideFontSizeDraft)">+</button>
             </div>
           </div>
-          <div v-if="targetGuide?.type !== 'text'">
+          <div v-if="targetGuide?.type !== 'text' && targetGuide?.type !== 'blank-box'">
             <p class="text-xs text-gray-500 mb-1">선 굵기</p>
             <div class="flex items-center gap-1">
               <button class="px-2 py-0.5 border rounded" @click="guideLineWidthDraft = Number(Math.max(GUIDE_LINE_WIDTH_MIN, guideLineWidthDraft - GUIDE_LINE_WIDTH_STEP).toFixed(1)); setGuideLineWidth(guideLineWidthDraft)">-</button>

@@ -82,3 +82,14 @@ export function toAngleLatex(text: string): string {
   }
   return trimmed
 }
+
+export function formatTextGuideDisplayText(text: string): string {
+  const source = text ?? ''
+  return source.replace(/([0-9A-Za-z)\]}])\s*cm\b/gi, '$1 cm')
+}
+
+export function toTextGuideLatex(text: string, useMathMode: boolean): string {
+  const source = text ?? ''
+  if (!useMathMode) return source
+  return source.replace(/([0-9A-Za-z)\]}])\s*cm\b/g, '$1\\kern0.5em\\text{cm}')
+}

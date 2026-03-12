@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import type { Point, Shape, ShapeGuideItemStyle } from '@/types'
 import type { useCanvasStore } from '@/stores/canvas'
 import type { useToolStore } from '@/stores/tool'
-import { renderLatexLikeHtml } from '@/utils/latexText'
+import { renderLatexLikeHtml, toTextGuideLatex } from '@/utils/latexText'
 
 interface TextInputState {
   point: Point
@@ -248,7 +248,7 @@ export function useCanvasTextEditing(options: UseCanvasTextEditingOptions) {
         key: guide.id,
         x: anchor.x,
         y: anchor.y,
-        html: renderLatexLikeHtml(guide.text || '', !!guide.useLatex),
+        html: renderLatexLikeHtml(toTextGuideLatex(guide.text || '', !!guide.useLatex), !!guide.useLatex),
         guideId: guide.id,
         color: guide.color || '#231815',
         fontSize: getTextGuideFontSize(guide),

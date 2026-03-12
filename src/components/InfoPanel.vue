@@ -685,7 +685,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
         <div class="info-row"><span class="info-key">타입</span><span class="info-value">{{ selectedGuideTypeLabel }}</span></div>
         <div v-if="selectedGuide?.type === 'text'" class="info-row"><span class="info-key">텍스트</span><span class="info-value">{{ selectedGuide?.text || '(빈 텍스트)' }}</span></div>
         <div v-if="selectedGuide?.type === 'text'" class="info-row"><span class="info-key">표기</span><span class="info-value">{{ selectedGuide?.useLatex ? 'LaTeX' : '일반 텍스트' }}</span></div>
-        <div class="info-row"><span class="info-key">색상</span><span class="color-chip" :title="getColorChipTitle(selectedGuideColor)" :style="{ backgroundColor: selectedGuideColor }"></span></div>
+        <div v-if="selectedGuide?.type !== 'blank-box'" class="info-row"><span class="info-key">색상</span><span class="color-chip" :title="getColorChipTitle(selectedGuideColor)" :style="{ backgroundColor: selectedGuideColor }"></span></div>
       </div>
     </section>
 
@@ -748,7 +748,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
       </div>
       <div v-else-if="hasGuideSelection" class="space-y-2">
         <p v-if="selectedGuide?.type === 'blank-box'" class="text-[11px] text-gray-500">타입: 빈칸</p>
-        <div>
+        <div v-if="selectedGuide?.type !== 'blank-box'">
           <p class="text-xs text-gray-500 mb-1">{{ selectedGuide?.type === 'text' ? '텍스트 색상' : '가이드 색상' }}</p>
           <div class="flex items-center flex-wrap gap-1.5">
             <button v-for="color in STROKE_PALETTE" :key="`guide-text-${color.id}`" class="w-5 h-5 rounded-full border hover:scale-110 transition" :class="selectedGuideColor === color.hex ? 'ring-2 ring-blue-500 border-white' : 'border-gray-300'" :style="{ backgroundColor: color.hex }" :title="cmykTooltip(color)" @click="setSelectedGuideColor(color.hex)"></button>
@@ -778,7 +778,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
             <button class="step-btn" @click="setSelectedGuideFontSize(selectedGuideFontSize + 1)">+</button>
           </div>
         </div>
-        <div v-if="selectedGuide?.type !== 'text'">
+        <div v-if="selectedGuide?.type !== 'text' && selectedGuide?.type !== 'blank-box'">
           <p class="text-xs text-gray-500 mb-1">선 굵기 (pt)</p>
           <div class="flex items-center gap-1">
             <button class="step-btn" @click="setSelectedGuideLineWidth(selectedGuideLineWidth - 0.1)">-</button>

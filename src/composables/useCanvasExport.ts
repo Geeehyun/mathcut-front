@@ -5,7 +5,7 @@ import { GRID_CONFIG } from '@/types'
 import { OPEN_SHAPE_TYPES } from '@/constants/shapeRules'
 import { useCanvasStore } from '@/stores/canvas'
 import { useToolStore } from '@/stores/tool'
-import { renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
+import { formatTextGuideDisplayText, renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex, toTextGuideLatex } from '@/utils/latexText'
 import katexCssRaw from 'katex/dist/katex.min.css?raw'
 import katexMainRegularUrl from 'katex/dist/fonts/KaTeX_Main-Regular.woff2?url'
 import katexMainBoldUrl from 'katex/dist/fonts/KaTeX_Main-Bold.woff2?url'
@@ -44,6 +44,13 @@ function getBlankBoxSuffixText(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' 
   if (mode === 'cm') return 'cm'
   if (mode === 'angle') return '°'
   return ''
+}
+
+function getBlankBoxSuffixLatexOffset(mode: 'none' | 'cm' | 'angle'): { x: number, y: number } {
+  if (mode === 'angle') {
+    return { x: -3, y: -3 }
+  }
+  return { x: 0, y: 0 }
 }
 
 interface ExportOptions {
@@ -677,10 +684,10 @@ async function generateVectorSVG(
       const rotation = svg.getTextGuideRotation(guide)
       const width = svg.getTextWidthPx(guide.text, gfs) + 32
       els.push(svgForeignObjectKatexEl(
-        renderLatexLikeHtml(guide.text, !!guide.useLatex),
+        renderLatexLikeHtml(toTextGuideLatex(guide.text, !!guide.useLatex), !!guide.useLatex),
         anchor.x,
         anchor.y - gfs * 0.45,
-        width,
+        Math.max(svg.getTextWidthPx(formatTextGuideDisplayText(guide.text), gfs) + 32, width),
         gfs * 2.2,
         gc,
         gfs,
@@ -706,8 +713,9 @@ async function generateVectorSVG(
         const unitMode = getBlankBoxUnitMode(guide)
         const gap = unitMode === 'cm' ? GRID_CONFIG.size / 2 : 4
         const fontSize = guide.fontSize || fs
-        const suffixX = x + width + gap
-        const suffixY = y + (height / 2) - (fontSize * 0.45)
+        const latexOffset = getBlankBoxSuffixLatexOffset(unitMode)
+        const suffixX = x + width + gap + latexOffset.x
+        const suffixY = y + (height / 2) - (fontSize * 0.45) + latexOffset.y
         const suffixLatex = toBlankBoxSuffixLatex(unitMode)
         if (suffixLatex) {
           els.push(svgForeignObjectKatexEl(
