@@ -15,7 +15,7 @@ type AuthSessionPayload = {
 }
 
 function getBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+  return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:9090'
 }
 
 function parseJwtExp(token: string): number | null {

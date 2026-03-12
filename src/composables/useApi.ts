@@ -2,7 +2,7 @@ import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
 
 function getBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+  return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:9090'
 }
 
 type RequestOptions = {
