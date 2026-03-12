@@ -37,10 +37,33 @@
 
 ---
 
-## 문서/인코딩 규칙
+## ⚠️ 인코딩 규칙 (위반 시 커밋 차단됨)
 
-- 문서(`*.md`)는 UTF-8로 유지합니다.
-- 한글 문서 수정 시 인코딩이 깨지지 않도록 저장 인코딩을 확인합니다.
+> **이 규칙은 git pre-commit hook(`.githooks/pre-commit`)으로 강제됩니다.**
+> 위반 시 커밋이 자동 차단되므로 반드시 준수하세요.
+
+### 필수 사항
+- **모든 소스 파일(`.vue`, `.ts`, `.js`, `.md`)은 반드시 UTF-8 인코딩으로 저장합니다.**
+- Windows 환경에서 파일 저장 시 CP949/EUC-KR이 아닌 UTF-8을 명시적으로 선택합니다.
+- `.editorconfig`에 `charset = utf-8`이 설정되어 있으므로 EditorConfig 지원 에디터 사용을 권장합니다.
+
+### 금지 사항 (pre-commit hook이 감지하는 패턴)
+- 소스 파일에 **CJK Compatibility Ideographs (U+F900-U+FAFF)** 포함 금지
+  - 예: 留(U+F9CD), 紐(U+F9CF), 罹(U+F9DC) 등이 주석에 나타나면 인코딩 오류
+- 소스 파일에 **Enclosed Digits (U+2460-U+2473, ①-⑳)** 포함 금지
+  - 예: ⑤(U+2464), ⑹(U+2479)가 주석에 나타나면 인코딩 오류
+
+### 확인 방법
+커밋 전 직접 검사하려면:
+```bash
+python3 .githooks/pre-commit
+```
+
+### 배경
+2026-03-12: Codex가 Windows CP949 환경에서 저장한 파일에서 한국어 주석 23개가
+`// 마우스 좌표` → `// 留덉슦??醫뚰몴` 형태로 깨진 사례 발생.
+이후 Claude가 수정 + pre-commit hook으로 재발 방지 조치 완료.
+
 - 운영 규칙 변경 시 `CODEX.md`와 `PROGRESS.md`에 함께 반영합니다.
 
 ---
@@ -54,6 +77,28 @@
 - 작업 완료 시:
   1. 상세 내용은 각자 로그 파일에 기록
   2. 최종 요약과 결과는 `PROGRESS.md`에 기록
+
+---
+
+## 백엔드 연동 현황
+
+> **2026-03-12부터 백엔드 API가 연동되었습니다.**
+
+| 항목 | 값 |
+|------|-----|
+| **백엔드 위치** | `D:\vision\mathcut-api` |
+| **API 명세** | `D:\vision\mathcut-api\API-SPEC.md` |
+| **Base URL** | `http://localhost:8080` |
+| **환경변수** | `VITE_API_BASE_URL=http://localhost:8080` (`.env`) |
+
+### 변경된 사항
+- `useAISketch.ts`: OpenAI 직접 호출 제거 → `POST /api/ai/sketch` 백엔드 호출로 교체
+- `VITE_OPENAI_API_KEY`, `VITE_OPENAI_MODEL` 환경변수 폐기 → `VITE_API_BASE_URL` 사용
+- 프롬프트 로직(`buildPrompt`, `buildUserInstruction`)은 백엔드로 이동됨
+
+### 주의
+- 프론트에서 OpenAI 직접 호출 코드를 절대 추가하지 마세요.
+- AI 관련 기능 수정 시 반드시 API 명세를 먼저 확인하세요.
 
 ---
 

@@ -49,6 +49,22 @@
 
 > 최신순 정렬. 상세 내용은 `logs/` 참조.
 
+### 2026-03-12 (2차)
+
+#### [Claude] AI 스케치 백엔드 API 연동 전환
+- `useAISketch.ts`: OpenAI 직접 호출 → `POST http://[API]/api/ai/sketch` 백엔드 호출로 교체
+- `useAISketch.ts`: `buildPrompt()`, `buildUserInstruction()`, `parseAIResponse()`, `BASE_PROMPT` 제거 (프롬프트 로직 백엔드로 이동)
+- `.env.example`: `VITE_OPENAI_API_KEY` → `VITE_API_BASE_URL=http://localhost:8080` 로 교체
+- 백엔드 API 명세: `D:\vision\mathcut-api\API-SPEC.md` 참조
+- `npm run build` 통과
+
+### 2026-03-12
+
+#### [Claude] 인코딩 깨진 주석 일괄 수정
+- `EditorView.vue`: 22개 깨진 한국어 주석 올바른 UTF-8로 수정
+- `GridCanvas.vue`: 1개 깨진 주석 수정
+- `npm run build` 통과
+
 ### 2026-03-11
 
 #### [Claude] AI 스케치 일반 삼각형 밑변 수평 정렬

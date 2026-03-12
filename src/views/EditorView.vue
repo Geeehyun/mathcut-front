@@ -15,7 +15,7 @@ const toolStore = useToolStore()
 const canvasStore = useCanvasStore()
 const gridCanvasRef = ref<any>(null)
 
-// 留덉슦??醫뚰몴 (寃⑹옄 ?⑥쐞)
+// 마우스 좌표 (격자 단위)
 const mousePos = ref<{ x: number, y: number } | null>(null)
 
 // 컷 관리
@@ -779,13 +779,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- EditorView: 而⑦뀒?대꼫 ?꾩껜 梨꾩?, flex 而щ읆 -->
+  <!-- EditorView: 콘테이너 전체 채움, flex 컨럼 -->
   <div class="absolute inset-0 flex flex-col bg-gray-950">
 
-    <!-- ===== ?곷떒 ?щ＼ 諛?(h-10) ===== -->
+    <!-- ===== 상단 크롬 바 (h-10) ===== -->
     <div class="shrink-0 h-10 bg-gray-900 border-b border-gray-800 flex items-center px-3 gap-3 z-30">
 
-      <!-- 濡쒓퀬 -->
+      <!-- 로고 -->
       <div class="flex items-center gap-1.5 mr-2">
         <div class="w-6 h-6 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-md flex items-center justify-center">
           <span class="text-white text-xs font-bold">M</span>
@@ -795,7 +795,7 @@ onUnmounted(() => {
 
       <div class="w-px h-5 bg-gray-700"></div>
 
-      <!-- 而?愿由?-->
+      <!-- 컷 관리 -->
       <div class="flex items-center gap-1">
         <button
           class="chrome-btn"
@@ -822,7 +822,7 @@ onUnmounted(() => {
 
       <div class="w-px h-5 bg-gray-700"></div>
 
-      <!-- 以?-->
+      <!-- 줄 -->
       <div class="flex items-center gap-1">
         <button
           class="chrome-btn"
@@ -850,7 +850,7 @@ onUnmounted(() => {
         >AI 스케치</button>
       </div>
 
-      <!-- ?대낫?닿린 -->
+      <!-- 내보내기 -->
       <div class="flex items-center gap-1">
         <button
           class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition font-medium"
@@ -858,19 +858,19 @@ onUnmounted(() => {
         >내보내기</button>
       </div>
 
-      <!-- ?ㅽ럹?댁꽌 -->
+      <!-- 스페이서 -->
       <div class="flex-1"></div>
 
-      <!-- ?좎? ?꾨컮? -->
+      <!-- 유저 아바타 -->
       <div class="w-7 h-7 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full flex items-center justify-center cursor-pointer hover:opacity-80 transition">
         <span class="text-white text-xs font-medium">U</span>
       </div>
     </div>
 
-    <!-- ===== 硫붿씤 ?곸뿭 (罹붾쾭??+ ?곗륫 ?⑤꼸) ===== -->
+    <!-- ===== 메인 영역 (캔버스 + 우측 패널) ===== -->
     <div class="flex-1 relative overflow-hidden">
 
-      <!-- 罹붾쾭?? ?덈? ?꾩튂濡??꾩껜 梨꾩? -->
+      <!-- 캔버스 전체화면 배치 -->
       <div class="absolute inset-0">
         <GridCanvas
           ref="gridCanvasRef"
@@ -888,17 +888,17 @@ onUnmounted(() => {
         @close="closeContextMenu"
       />
 
-      <!-- ?곗륫 ?⑤꼸 而⑦뀒?대꼫 -->
+      <!-- 우측 패널 콘테이너 -->
       <div class="absolute top-0 right-0 bottom-0 left-0 z-10 flex items-start justify-end pointer-events-none">
 
-        <!-- ?곗륫 ?⑤꼸 蹂몄껜 -->
+        <!-- 우측 패널 본체 -->
         <div
           class="h-full w-64 bg-white/95 backdrop-blur-sm border-l border-gray-200 shadow-2xl
                  flex flex-col overflow-hidden transition-transform duration-200 ease-in-out
                  pointer-events-auto"
           :class="rightPanelOpen ? 'translate-x-0' : 'translate-x-64'"
         >
-          <!-- ???ㅻ뜑 -->
+          <!-- 탭 헤더 -->
           <div class="shrink-0 flex border-b border-gray-200">
             <button
               class="flex-1 py-2.5 text-xs font-semibold transition"
@@ -912,12 +912,12 @@ onUnmounted(() => {
             >레이어</button>
           </div>
 
-          <!-- ?띿꽦 ??-->
+          <!-- 속성 탭 -->
           <div v-if="activeTab === 'info'" class="flex-1 overflow-y-auto p-3">
             <InfoPanel />
           </div>
 
-          <!-- ?덉씠????-->
+          <!-- 레이어 탭 -->
           <div v-if="activeTab === 'layer'" class="relative flex-1 overflow-y-auto p-3 pb-20">
             <div v-if="groupedLayers.length === 0 && unboundGuides.length === 0" class="text-sm text-gray-400 text-center py-8">
               도형/가이드를 추가하면<br>여기에 표시됩니다
@@ -1041,7 +1041,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- ?곗륫 ?⑤꼸 ?좉? ??-->
+        <!-- 우측 패널 토글 버튼 -->
         <button
           class="absolute top-16 bg-gray-900/80 backdrop-blur-sm border border-gray-700 rounded-l-lg
                  w-5 py-4 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800
@@ -1192,10 +1192,10 @@ onUnmounted(() => {
       @close="aiSketchModalOpen = false"
     />
 
-    <!-- ===== ?섎떒 ?곹깭 諛?(h-8) ===== -->
+    <!-- ===== 하단 상태 바 (h-8) ===== -->
     <div class="shrink-0 h-8 bg-gray-900 border-t border-gray-800 flex items-center px-3 gap-3 z-30">
 
-      <!-- ?꾩옱 ?꾧뎄 -->
+      <!-- 현재 도구 -->
       <div class="flex items-center gap-1.5">
         <span class="text-sm text-gray-300 leading-none">{{ currentIcon }}</span>
         <span class="text-xs font-medium text-gray-200">{{ currentTool }}</span>
@@ -1203,13 +1203,13 @@ onUnmounted(() => {
 
       <div class="w-px h-4 bg-gray-700"></div>
 
-      <!-- ?덈궡 臾멸뎄 -->
+      <!-- 안내 문구 -->
       <span class="text-xs text-gray-400 flex-1 truncate">{{ instruction }}</span>
 
-      <!-- 寃⑹옄 紐⑤뱶 -->
+      <!-- 격자 모드 -->
       <span class="text-xs text-gray-500">{{ gridModeLabel }}</span>
 
-      <!-- 留덉슦??醫뚰몴 -->
+      <!-- 마우스 좌표 -->
       <span v-if="mousePos" class="text-xs text-gray-500 min-w-[5rem] text-right font-mono">
         x:{{ mousePos.x }} y:{{ mousePos.y }}
       </span>

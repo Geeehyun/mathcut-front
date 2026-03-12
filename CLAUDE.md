@@ -24,9 +24,12 @@
 - **Pinia**: 상태 관리
 - **Tailwind CSS**: 스타일링
 
-### 백엔드 (mathcut-api) - 2단계 예정
+### 백엔드 (mathcut-api) - **연동 시작**
 - Kotlin + Spring Boot
-- AI API 프록시 (OpenAI/Stability AI)
+- 위치: `D:\vision\mathcut-api`
+- API 명세: `D:\vision\mathcut-api\API-SPEC.md`
+- Base URL: `http://localhost:8080`
+- 실행: `OPENAI_API_KEY=sk-... ./gradlew bootRun`
 
 ---
 

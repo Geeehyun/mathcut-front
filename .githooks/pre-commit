@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MathCut pre-commit hook: 인코딩 깨진 한국어 텍스트 검사
+- Vue/TS/JS 파일에 EUC-KR/CP949로 잘못 저장된 주석이 있으면 커밋 차단
+"""
+
+import subprocess
+import sys
+import re
+
+# 검사할 파일 확장자
+TARGET_EXTS = ('.vue', '.ts', '.js', '.tsx', '.jsx')
+
+# 의심 패턴: 한국어 소스에 이 유니코드 블록이 나오면 인코딩 깨짐
+# U+F900-U+FAFF: CJK Compatibility Ideographs (留, 紐, 罹 등)
+# U+2460-U+2473: Enclosed digits (⑤, ⑹ 등)
+# U+3130-U+318F: Hangul Compatibility Jamo (단독 자모 – 주석에서는 비정상)
+BAD_RANGES = [
+    (0xF900, 0xFAFF),   # CJK Compatibility Ideographs
+    (0x2460, 0x2473),   # Enclosed Alphanumerics (①-⑳)
+]
+
+def check_file(path):
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+    except OSError:
+        return []
+
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return [f"{path}: UTF-8 디코딩 실패 (파일을 UTF-8로 저장하세요)"]
+
+    errors = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for ch in line:
+            cp = ord(ch)
+            for lo, hi in BAD_RANGES:
+                if lo <= cp <= hi:
+                    errors.append(
+                        f"  {path}:{lineno}: 깨진 문자 U+{cp:04X} ({ch!r}) — "
+                        f"파일을 UTF-8로 다시 저장하세요"
+                    )
+                    break
+    return errors
+
+def main():
+    # staged 파일 목록
+    result = subprocess.run(
+        ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACM'],
+        capture_output=True, text=True
+    )
+    staged = [p.strip() for p in result.stdout.splitlines() if p.strip()]
+
+    all_errors = []
+    for path in staged:
+        if not any(path.endswith(ext) for ext in TARGET_EXTS):
+            continue
+        all_errors.extend(check_file(path))
+
+    if all_errors:
+        print("❌ 커밋 차단: 인코딩 깨진 문자 발견")
+        print("   파일을 UTF-8로 저장한 뒤 다시 커밋하세요.\n")
+        for err in all_errors:
+            print(err)
+        sys.exit(1)
+
+    sys.exit(0)
+
+if __name__ == '__main__':
+    main()
