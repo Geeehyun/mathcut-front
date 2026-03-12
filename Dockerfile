@@ -13,7 +13,7 @@ WORKDIR /app
 
 # package.json, package-lock.json 먼저 복사
 # → 의존성 설치 캐시를 최대한 활용하기 위함
-COPY package*.json ./
+COPY package*.json .npmrc* ./
 
 # npm ci:
 # - package-lock.json 기준으로 정확하게 설치
