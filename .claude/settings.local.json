@@ -24,7 +24,10 @@
       "Bash(powershell -Command \"\n\\\\$content = [System.IO.File]::ReadAllBytes\\('D:\\\\vision\\\\mathcut-front\\\\src\\\\views\\\\EditorView.vue'\\)\n\\\\$text = [System.Text.Encoding]::UTF8.GetString\\(\\\\$content\\)\n\\\\$lines = \\\\$text -split '\\\\n'\nWrite-Host 'Line 18:' \\\\$lines[17]\nWrite-Host 'Line 1206:' \\\\$lines[1205]\nWrite-Host 'Line 1209:' \\\\$lines[1208]\nWrite-Host 'Line 1212:' \\\\$lines[1211]\n\")",
       "Bash(powershell.exe -Command \"Get-ChildItem 'D:\\\\\\\\vision\\\\\\\\mathcut-front\\\\\\\\src' -Recurse -Include '*.vue','*.ts' | ForEach-Object { \\\\$content = Get-Content \\\\$_.FullName -Raw -Encoding UTF8; if \\(\\\\$content -match '[\\\\u7559\\\\u5BC3\\\\u81FE\\\\u7D90\\\\u91AB\\\\uB549\\\\uC9A6\\\\uB548]'\\) { Write-Host \\\\$_.FullName } }\" 2>&1)",
       "Bash(rm D:/vision/mathcut-front/fix_encoding.py && cd D:/vision/mathcut-front && npm run build 2>&1 | tail -5)",
-      "Bash(chmod +x D:/vision/mathcut-front/.git/hooks/pre-commit && echo \"OK\")"
+      "Bash(chmod +x D:/vision/mathcut-front/.git/hooks/pre-commit && echo \"OK\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(node --version && npm --version)"
     ]
   }
 }
