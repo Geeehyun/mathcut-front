@@ -2672,7 +2672,7 @@ function shouldRenderCanvasTextGuide(): boolean {
 }
 
 // ── 진짜 벡터 SVG 내보내기 ───────────────────────────────────────────
-const { exportImage } = useCanvasExport({
+const { exportImage, createPngDataUrl } = useCanvasExport({
   stageRef,
   canvasWidth,
   canvasHeight,
@@ -2758,7 +2758,7 @@ const { exportImage } = useCanvasExport({
   }
 })
 
-defineExpose({ exportImage })
+defineExpose({ exportImage, createPngDataUrl })
 </script>
 
 <template>

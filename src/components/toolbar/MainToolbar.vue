@@ -34,7 +34,7 @@ const emit = defineEmits<{
     <div class="flex items-center gap-2 pr-3 border-r border-gray-200">
       <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">화면 비율</span>
       <button class="btn-small" @click="emit('zoom-out')">축소</button>
-      <span class="text-sm font-semibold text-gray-700 w-12 text-center">{{ props.zoom }}%</span>
+      <span class="text-sm font-semibold text-gray-700 w-12 text-center whitespace-pre">{{ props.zoom }} %</span>
       <button class="btn-small" @click="emit('zoom-in')">확대</button>
     </div>
 

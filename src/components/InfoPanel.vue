@@ -586,7 +586,7 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
     <div class="pb-2 border-b border-gray-200">
       <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">속성 패널</h3>
       <p class="text-xs text-gray-400 mt-1">
-        {{ hasShapeSelection ? `선택됨: ${selectedShapeTypeLabel}` : hasGuideSelection ? `선택됨: ${selectedGuideTypeLabel}` : '도형을 클릭해 선택하세요' }}
+        {{ hasShapeSelection ? `선택됨: ${selectedShapeTypeLabel}` : hasGuideSelection ? `선택됨: ${selectedGuideTypeLabel}` : '도형을 클릭해 선택하세요.' }}
       </p>
     </div>
 
@@ -625,12 +625,12 @@ function reorderLayer(direction: 'up' | 'down' | 'front' | 'back') {
         <button class="action-btn" :disabled="!hasShapeSelection" @click="duplicateSelected">복제</button>
         <button class="action-btn danger" :disabled="!hasSelection" @click="deleteSelected">삭제</button>
       </div>
-      <p class="text-[11px] text-gray-500 mt-2">도형 선택·수정 | Space + 드래그로 화면 이동</p>
+      <p class="text-[11px] text-gray-500 mt-2">도형 선택·수정 | Space + 드래그로 화면 이동.</p>
     </section>
 
     <section v-if="hasShapeSelection" class="panel-section">
       <h4 class="panel-title">회전/대칭</h4>
-      <p class="text-[11px] text-gray-500">도형 회전은 캔버스에서 마우스 드래그로도 조절 가능합니다</p>
+      <p class="text-[11px] text-gray-500">도형 회전은 캔버스에서 마우스 드래그로도 조절 가능합니다.</p>
       <div class="flex items-center gap-2 mt-2">
         <input v-model.number="rotateAngle" type="number" min="1" class="input-sm w-20">
         <span class="text-xs text-gray-400">도</span>

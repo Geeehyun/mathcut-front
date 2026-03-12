@@ -782,31 +782,23 @@ export function useCanvasExport(options: UseCanvasExportOptions) {
     svg,
   } = options
 
-  async function exportImage(
-    format: ExportFormat,
+  async function createPngDataUrl(
     width: number,
     height: number,
-    dpi: number = 300,
-    exportOptions?: ExportOptions
-  ): Promise<boolean> {
+    exportOptions?: Pick<ExportOptions, 'includeBackground' | 'grayscale'>
+  ): Promise<string | null> {
     const stage = stageRef.value?.getNode?.()
-    if (!stage) return false
+    if (!stage) return null
+
     const w = Math.max(100, width || canvasWidth)
     const h = Math.max(100, height || canvasHeight)
-    const dpiScale = Math.max(1, dpi / 96)
-    const isDownscaling = w < canvasWidth || h < canvasHeight
-    const pixelRatio = isDownscaling
-      ? Math.max(w / canvasWidth, h / canvasHeight, 0.2)
-      : dpiScale
     const includeBackground = exportOptions?.includeBackground !== false
     const grayscale = exportOptions?.grayscale === true
-    const embedFonts = format === 'svg'
-      ? exportOptions?.embedFonts !== false
-      : exportOptions?.embedFonts === true
-    const baseName = sanitizeFilename(exportOptions?.fileName || '')
+    const pixelRatio = Math.max(w / canvasWidth, h / canvasHeight, 0.2)
     const backgroundNode = stage.findOne('.export-bg') as any
     const gridLayer = backgroundNode ? (backgroundNode.getLayer?.() ?? null) : null
     const prevGridLayerVisible = gridLayer ? gridLayer.visible() : true
+
     if (gridLayer && !includeBackground) {
       gridLayer.visible(false)
       stage.draw()
@@ -818,12 +810,12 @@ export function useCanvasExport(options: UseCanvasExportOptions) {
     const prevSPY = stage.y()
     const prevSW = stage.width()
     const prevSH = stage.height()
+
     stage.width(canvasWidth)
     stage.height(canvasHeight)
     stage.scale({ x: 1, y: 1 })
     stage.position({ x: 0, y: 0 })
 
-    let pngDataUrl: string
     try {
       const sourceCanvas = stage.toCanvas({ pixelRatio })
       const outputCanvas = document.createElement('canvas')
@@ -841,6 +833,7 @@ export function useCanvasExport(options: UseCanvasExportOptions) {
       const srcW = Math.round(canvasWidth * pixelRatio)
       const srcH = Math.round(canvasHeight * pixelRatio)
       outputCtx.drawImage(sourceCanvas, 0, 0, srcW, srcH, 0, 0, w, h)
+
       if (grayscale) {
         const imageData = outputCtx.getImageData(0, 0, w, h)
         const d = imageData.data
@@ -852,26 +845,44 @@ export function useCanvasExport(options: UseCanvasExportOptions) {
         }
         outputCtx.putImageData(imageData, 0, 0)
       }
-      pngDataUrl = outputCanvas.toDataURL('image/png')
+
+      return outputCanvas.toDataURL('image/png')
     } catch (err) {
-      console.error('[exportImage] render failed:', err)
+      console.error('[createPngDataUrl] render failed:', err)
       alertRenderFailure()
-      if (gridLayer && !includeBackground) {
-        gridLayer.visible(prevGridLayerVisible)
-        stage.draw()
-      }
-      return false
+      return null
     } finally {
       stage.width(prevSW)
       stage.height(prevSH)
       stage.scale({ x: prevSX, y: prevSY })
       stage.position({ x: prevSPX, y: prevSPY })
+      if (gridLayer && !includeBackground) {
+        gridLayer.visible(prevGridLayerVisible)
+        stage.draw()
+      }
     }
+  }
 
-    if (gridLayer && !includeBackground) {
-      gridLayer.visible(prevGridLayerVisible)
-      stage.draw()
-    }
+  async function exportImage(
+    format: ExportFormat,
+    width: number,
+    height: number,
+    dpi: number = 300,
+    exportOptions?: ExportOptions
+  ): Promise<boolean> {
+    const w = Math.max(100, width || canvasWidth)
+    const h = Math.max(100, height || canvasHeight)
+    const dpiScale = Math.max(1, dpi / 96)
+    const includeBackground = exportOptions?.includeBackground !== false
+    const grayscale = exportOptions?.grayscale === true
+    const embedFonts = format === 'svg'
+      ? exportOptions?.embedFonts !== false
+      : exportOptions?.embedFonts === true
+    const baseName = sanitizeFilename(exportOptions?.fileName || '')
+    const renderWidth = dpiScale > 1 ? Math.round(canvasWidth * dpiScale) : w
+    const renderHeight = dpiScale > 1 ? Math.round(canvasHeight * dpiScale) : h
+    const pngDataUrl = await createPngDataUrl(renderWidth, renderHeight, { includeBackground, grayscale })
+    if (!pngDataUrl) return false
 
     if (format === 'png') {
       downloadDataUrl(pngDataUrl, `${baseName}.png`)
@@ -901,7 +912,7 @@ export function useCanvasExport(options: UseCanvasExportOptions) {
     return true
   }
 
-  return { exportImage }
+  return { exportImage, createPngDataUrl }
 }
 
 
