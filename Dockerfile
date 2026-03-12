@@ -19,7 +19,8 @@ COPY package*.json .npmrc* ./
 # - package-lock.json 기준으로 정확하게 설치
 # - CI/CD 환경에서 재현성 좋음
 # - devDependencies도 설치 (빌드에 필요: vite, @vitejs/plugin-vue 등)
-RUN npm ci
+# - legacy-peer-deps: vue-router@5 / pinia@2 peer dep 충돌 우회
+RUN npm ci --legacy-peer-deps
 
 # 나머지 소스 코드 복사
 COPY . .
