@@ -653,9 +653,9 @@ async function generateVectorSVG(
         const tc = svg.getShapeGuideTextColor(shape, 'pointName', pi, svg.getShapeGuideFallbackTextColor(shape, 'pointName', pi))
         const pSt = svg.getShapeGuideItemStyle(shape, 'pointName', pi)
         const fontSize = pSt.fontSize || fs
-        const width = svg.getTextWidthPx(label, fontSize) + 24
+        const width = Math.max(svg.getTextWidthPx(label, fontSize) + 24, fontSize * 4)
         els.push(svgForeignObjectKatexEl(
-          renderLatexLikeHtml(label, !!shape.pointLabelLatex?.[pi]),
+          renderLatexLikeHtml(label, true),
           pos.x,
           pos.y,
           width,

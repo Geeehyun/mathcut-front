@@ -34,6 +34,7 @@ import type { Point, Shape, ShapeGuideItemStyle } from '@/types'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { formatMathText } from '@/utils/mathText'
 import { renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankUnitLatex, toLengthLatex } from '@/utils/latexText'
+import { createLatexCanvasSprite } from '@/utils/latexCanvas'
 import { useCanvasExport } from '@/composables/useCanvasExport'
 import { useCanvasInteraction } from '@/composables/useCanvasInteraction'
 import { useCanvasTextEditing } from '@/composables/useCanvasTextEditing'
@@ -67,6 +68,7 @@ import {
   getShapeHeightLabelPos as getSharedShapeHeightLabelPos,
   getShapeHeightRightAngleMarkerPoints as getSharedShapeHeightRightAngleMarkerPoints,
   getShapeLengthLabelPos as getSharedShapeLengthLabelPos,
+  interpolateOnPolyline,
   getPointNameDefaultPos,
   getShapeCentroid,
   getUnitVisualRectFromTopLeft as getSharedUnitVisualRectFromTopLeft
@@ -1299,6 +1301,15 @@ function getLengthGuideLabelPos(guide: { points: { x: number, y: number }[] }): 
 }
 
 function getShapePointNameDefaultPos(shape: Shape, index: number): { x: number, y: number } {
+  if (shouldPlaceCircleCenterPointNameBelow(shape, index)) {
+    const point = shape.points[index]
+    if (point) {
+      return {
+        x: point.x - 4,
+        y: point.y + 8
+      }
+    }
+  }
   return getPointNameDefaultPos(shape.type, shape.points, index)
 }
 
@@ -1306,6 +1317,20 @@ function getShapePointNameTextPos(shape: Shape, index: number): { x: number, y: 
   const base = getShapePointNameDefaultPos(shape, index)
   const offset = getShapeGuideItemOffset(shape, 'pointName', index)
   return { x: base.x + offset.x, y: base.y + offset.y }
+}
+
+function shouldPlaceCircleCenterPointNameBelow(shape: Shape, index: number): boolean {
+  if (shape.type !== 'circle' || index !== 0) return false
+  if (!toolStore.showLength) return false
+  if (!isShapeGuideVisible(shape, 'radius')) return false
+  if (!isShapeGuideItemVisible(shape, 'length', 0)) return false
+
+  const { p1, p2 } = getCircleLengthEndpoints(shape)
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  const verticality = Math.abs(dy) / len
+  return verticality >= 0.85
 }
 
 function getShapeAngleValueText(shape: Shape, index: number): string {
@@ -1717,12 +1742,13 @@ function getCircleLengthEndpoints(shape: Shape): { p1: { x: number, y: number },
 
 function getCircleLengthLabelPos(shape: Shape): { x: number, y: number } {
   const { p1, p2 } = getCircleLengthEndpoints(shape)
-  const curveSide = getShapeLengthCurveSide(shape, 0)
+  const center = shape.points[0]
+  const edge = shape.points[1]
   const fontSize = getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
   const mainText = getLengthMainText(getCircleLengthValueText(shape))
   const mainWidth = getTextWidthPx(mainText, fontSize)
   const unitWidth = toolStore.showGuideUnit ? getTextWidthPx('cm', fontSize) : 0
-  return snapTextPoint(getSharedCircleLengthLabelPos(
+  const initialLabelPos = getSharedCircleLengthLabelPos(
     shape,
     { ...p1, gridX: p1.x / GRID_CONFIG.size, gridY: p1.y / GRID_CONFIG.size },
     { ...p2, gridX: p2.x / GRID_CONFIG.size, gridY: p2.y / GRID_CONFIG.size },
@@ -1731,22 +1757,110 @@ function getCircleLengthLabelPos(shape: Shape): { x: number, y: number } {
     unitWidth,
     toolStore.showGuideUnit ? getLengthUnitGapPx() : 0,
     shape.points[0],
-    curveSide
-  ))
+    getShapeLengthCurveSide(shape, 0)
+  )
+  const resolvedSide = getResolvedCircleLengthCurveSide(shape, p1, p2, initialLabelPos)
+  const side = resolvedSide === -1 ? -1 : 1
+  const curve = getTwoPointLengthCurvePoints(p1, p2, resolvedSide, CIRCLE_LENGTH_CURVE_OFFSET_PX)
+  const midpoint = interpolateOnPolyline(curve, getPolylineLength(curve) / 2)
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const verticality = Math.abs(dy) / len
+  const radius = center && edge ? calculateDistance(center, edge) : 0
+  const baseLift = Math.max(3.5, fontSize * 0.32)
+  const textSpan = mainWidth + (toolStore.showGuideUnit ? unitWidth + getLengthUnitGapPx() : 0)
+  const visualTextSpan = textSpan * 1.18 + fontSize * 0.45
+  const verticalClearance = (visualTextSpan * 0.5 + 6) * verticality
+  const desiredLift = Math.max(
+    baseLift * (1 + verticality * 1.8),
+    verticalClearance
+  )
+  const minRadiusForLift = fontSize * 2.2
+  const maxLift = Math.max(0, radius - minRadiusForLift)
+  let lift = Math.min(desiredLift, maxLift)
+  let candidate = {
+    x: midpoint.x + nx * side * lift,
+    y: midpoint.y + ny * side * lift
+  }
+
+  const step = Math.max(2, fontSize * 0.18)
+  while (lift < maxLift) {
+    const rect = getLengthGuideTextRect(candidate.x, candidate.y, mainText, fontSize, toolStore.showGuideUnit)
+    const clearancePadding = Math.min(
+      Math.max(0, maxLift),
+      Math.max(fontSize * 0.1, 1.5) + verticality * Math.max(fontSize * 0.9, 10)
+    )
+    const clearanceRect = {
+      left: rect.left - clearancePadding,
+      right: rect.right + clearancePadding,
+      top: rect.top - clearancePadding,
+      bottom: rect.bottom + clearancePadding
+    }
+    if (!segmentIntersectsRect(p1.x, p1.y, p2.x, p2.y, clearanceRect)) break
+    lift = Math.min(maxLift, lift + step)
+    candidate = {
+      x: midpoint.x + nx * side * lift,
+      y: midpoint.y + ny * side * lift
+    }
+  }
+
+  const lineMidX = (p1.x + p2.x) / 2
+  const lineMidY = (p1.y + p2.y) / 2
+  const actualNormalSeparation = Math.abs((candidate.x - lineMidX) * nx + (candidate.y - lineMidY) * ny)
+  const requiredNormalSeparation = Math.min(
+    maxLift,
+    baseLift + verticality * ((visualTextSpan * 0.5) + fontSize * 1.0 + 10)
+  )
+  if (requiredNormalSeparation > actualNormalSeparation) {
+    lift = Math.min(maxLift, lift + (requiredNormalSeparation - actualNormalSeparation))
+    candidate = {
+      x: midpoint.x + nx * side * lift,
+      y: midpoint.y + ny * side * lift
+    }
+  }
+
+  return snapTextPoint(candidate)
 }
 
 function getCircleLengthLabelWorldPos(shape: Shape): { x: number, y: number } {
   return getShapeGuideLabelWorldPos(shape, 'length', 0)
 }
 
+function getResolvedCircleLengthCurveSide(
+  shape: Shape,
+  p1: { x: number, y: number },
+  p2: { x: number, y: number },
+  labelCenter: { x: number, y: number }
+): 1 | -1 | undefined {
+  const explicitSide = getShapeLengthCurveSide(shape, 0)
+  if (explicitSide === 1 || explicitSide === -1) return explicitSide
+
+  const midX = (p1.x + p2.x) / 2
+  const midY = (p1.y + p2.y) / 2
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const dot = (labelCenter.x - midX) * nx + (labelCenter.y - midY) * ny
+  return dot >= 0 ? 1 : -1
+}
+
 function getCircleLengthCurveSegments(shape: Shape): number[][] {
   const { p1, p2 } = getCircleLengthEndpoints(shape)
-  const curveSide = getShapeLengthCurveSide(shape, 0)
-  const curve = getTwoPointLengthCurvePoints(p1, p2, curveSide, CIRCLE_LENGTH_CURVE_OFFSET_PX)
   const text = getCircleLengthValueText(shape)
   const fontSize = getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
   const isBlank = isShapeGuideItemBlank(shape, 'length', 0)
   const labelCenter = getCircleLengthLabelWorldPos(shape)
+  const curve = getTwoPointLengthCurvePoints(
+    p1,
+    p2,
+    getResolvedCircleLengthCurveSide(shape, p1, p2, labelCenter),
+    CIRCLE_LENGTH_CURVE_OFFSET_PX
+  )
   const aroundRect = isBlank
     ? (() => {
       const blankRect = getShapeGuideBlankRect(shape, 'length', 0)
@@ -1855,8 +1969,13 @@ function getShapeHeightLengthGuideSegments(shape: Shape): number[][] {
   const style = getShapeGuideItemStyle(shape, 'height', 0)
   const fontSize = style.fontSize || DEFAULT_TEXT_FONT_SIZE
   const isBlank = isShapeGuideItemBlank(shape, 'height', 0)
-  const curve = getTwoPointLengthCurvePoints(h.apex, h.foot, getShapeHeightCurveSide(shape), HEIGHT_LENGTH_CURVE_OFFSET_PX)
   const labelCenter = getShapeHeightLabelWorldPos(shape)
+  const curve = getTwoPointLengthCurvePoints(
+    h.apex,
+    h.foot,
+    getResolvedShapeHeightCurveSide(shape, h, labelCenter),
+    HEIGHT_LENGTH_CURVE_OFFSET_PX
+  )
   const mainText = getLengthMainText(getShapeHeightValueText(shape))
   const aroundRect = isBlank
     ? (() => {
@@ -1919,6 +2038,25 @@ function getShapeHeightMeasureLineWidth(shape: Shape): number {
 function getShapeHeightCurveSide(shape: Shape): 1 | -1 | undefined {
   const side = getShapeGuideItemStyle(shape, 'height', 0).curveSide
   return side === -1 ? -1 : side === 1 ? 1 : undefined
+}
+
+function getResolvedShapeHeightCurveSide(
+  shape: Shape,
+  heightGuide: { apex: Point, foot: Point },
+  labelCenter: { x: number, y: number }
+): 1 | -1 | undefined {
+  const explicitSide = getShapeHeightCurveSide(shape)
+  if (explicitSide === 1 || explicitSide === -1) return explicitSide
+
+  const midX = (heightGuide.apex.x + heightGuide.foot.x) / 2
+  const midY = (heightGuide.apex.y + heightGuide.foot.y) / 2
+  const dx = heightGuide.foot.x - heightGuide.apex.x
+  const dy = heightGuide.foot.y - heightGuide.apex.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const dot = (labelCenter.x - midX) * nx + (labelCenter.y - midY) * ny
+  return dot >= 0 ? 1 : -1
 }
 
 function formatLengthGuideText(raw: string | undefined): string {
@@ -2425,15 +2563,111 @@ const latexShapeGuideOverlays = computed(() => {
   return overlays
 })
 
-function shouldRenderCanvasPointName(): boolean {
-  return false
+type RuntimeLatexSpriteState = Awaited<ReturnType<typeof createLatexCanvasSprite>> & {
+  signature: string
+}
+
+type RuntimeLatexCanvasEntry = {
+  key: string
+  html: string
+  color: string
+  fontSize: number
+  fontFamily: string
+}
+
+const runtimeShapeLatexEntries = computed<RuntimeLatexCanvasEntry[]>(() => [
+  ...latexPointLabelOverlays.value.map((overlay) => ({
+    key: `point:${overlay.key}`,
+    html: overlay.html,
+    color: overlay.color,
+    fontSize: overlay.fontSize,
+    fontFamily: DEFAULT_TEXT_FONT_FAMILY
+  })),
+  ...latexShapeGuideOverlays.value.map((overlay) => ({
+    key: `shape:${overlay.key}`,
+    html: overlay.html,
+    color: overlay.color,
+    fontSize: overlay.fontSize,
+    fontFamily: DEFAULT_TEXT_FONT_FAMILY
+  }))
+])
+
+const runtimeShapeLatexSprites = ref<Record<string, RuntimeLatexSpriteState>>({})
+
+watch(runtimeShapeLatexEntries, (entries) => {
+  const activeKeys = new Set(entries.map((entry) => entry.key))
+  const nextSprites: Record<string, RuntimeLatexSpriteState> = {}
+  for (const [key, sprite] of Object.entries(runtimeShapeLatexSprites.value)) {
+    if (activeKeys.has(key)) nextSprites[key] = sprite
+  }
+  runtimeShapeLatexSprites.value = nextSprites
+
+  for (const entry of entries) {
+    const signature = JSON.stringify([entry.html, entry.color, entry.fontSize, entry.fontFamily])
+    if (runtimeShapeLatexSprites.value[entry.key]?.signature === signature) continue
+    createLatexCanvasSprite({
+      html: entry.html,
+      color: entry.color,
+      fontSize: entry.fontSize,
+      fontFamily: entry.fontFamily
+    }).then((sprite) => {
+      const stillActive = runtimeShapeLatexEntries.value.some((target) => target.key === entry.key)
+      if (!stillActive) return
+      runtimeShapeLatexSprites.value = {
+        ...runtimeShapeLatexSprites.value,
+        [entry.key]: { ...sprite, signature }
+      }
+      const stage = stageRef.value?.getNode?.()
+      stage?.batchDraw?.()
+    }).catch(() => {
+      // Ignore sprite generation failures and keep the canvas fallback empty.
+    })
+  }
+}, { immediate: true })
+
+const latexPointLabelOverlayMap = computed(() => {
+  return new Map(latexPointLabelOverlays.value.map((overlay) => [overlay.key, overlay]))
+})
+
+const latexShapeGuideOverlayMap = computed(() => {
+  return new Map(latexShapeGuideOverlays.value.map((overlay) => [overlay.key, overlay]))
+})
+
+function getRuntimePointLatexSprite(shapeId: string, pointIndex: number) {
+  const overlay = latexPointLabelOverlayMap.value.get(`${shapeId}-${pointIndex}`)
+  const sprite = runtimeShapeLatexSprites.value[`point:${shapeId}-${pointIndex}`]
+  if (!overlay || !sprite) return null
+  return {
+    overlay,
+    sprite
+  }
+}
+
+function getRuntimeShapeGuideLatexSprite(overlayKey: string) {
+  const overlay = latexShapeGuideOverlayMap.value.get(overlayKey)
+  const sprite = runtimeShapeLatexSprites.value[`shape:${overlayKey}`]
+  if (!overlay || !sprite) return null
+  return {
+    overlay,
+    sprite
+  }
+}
+
+function getRuntimeLatexImageX(
+  overlay: { x: number, centerAlign?: boolean },
+  sprite: { insetX: number, contentWidth: number }
+): number {
+  return snapTextValue((overlay.centerAlign ? overlay.x - (sprite.contentWidth * 0.5) : overlay.x) - sprite.insetX)
+}
+
+function getRuntimeLatexImageY(
+  overlay: { y: number },
+  sprite: { insetY: number }
+): number {
+  return snapTextValue(overlay.y - sprite.insetY)
 }
 
 function shouldRenderCanvasTextGuide(): boolean {
-  return false
-}
-
-function shouldRenderCanvasShapeGuideValue(): boolean {
   return false
 }
 
@@ -2603,17 +2837,15 @@ defineExpose({ exportImage })
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', 0, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 0, $event)"
             />
-            <v-text
-              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
+            <v-image
+              v-if="getRuntimePointLatexSprite(shape.id, 0) && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
               @dblclick="handlePointLabelDblClick(shape, 0, $event)"
               :config="{
-                x: getShapePointNameTextPos(shape, 0).x,
-                y: getShapePointNameTextPos(shape, 0).y,
-                text: formatMathText(getGlobalPointLabel(shape.id, 0)),
-                fontSize: getShapeGuideItemStyle(shape, 'pointName', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'pointName', 0, getShapeGuideFallbackTextColor(shape, 'pointName', 0)),
-                fontStyle: 'normal',
+                image: getRuntimePointLatexSprite(shape.id, 0)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimePointLatexSprite(shape.id, 0)!.overlay, getRuntimePointLatexSprite(shape.id, 0)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimePointLatexSprite(shape.id, 0)!.overlay, getRuntimePointLatexSprite(shape.id, 0)!.sprite),
+                width: getRuntimePointLatexSprite(shape.id, 0)!.sprite.width,
+                height: getRuntimePointLatexSprite(shape.id, 0)!.sprite.height,
                 listening: true,
                 shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 0) ? '#38BDF8' : 'transparent',
                 shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 8 : 0,
@@ -2820,37 +3052,25 @@ defineExpose({ exportImage })
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'length', pIndex, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', pIndex, $event)"
               />
-              <v-text
-                v-if="false && isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
+              <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`) && isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
                 :config="{
-                  x: getShapeGuideBlankTextPos(shape, 'length', pIndex, 'unit').x,
-                  y: getShapeGuideBlankTextPos(shape, 'length', pIndex, 'unit').y,
-                  text: 'cm',
-                  fontSize: getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'length', pIndex, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}-blank-unit`)!.sprite.height,
                   listening: false
                 }"
               />
-              <v-text
-                v-if="shouldRenderCanvasShapeGuideValue() && !isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex)"
+            <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`) && !isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex)"
                 :config="{
-                  x: getShapeGuideLabelWorldPos(shape, 'length', pIndex).x,
-                  y: getShapeGuideLabelWorldPos(shape, 'length', pIndex).y,
-                  text: isShapeGuideItemBlank(shape, 'length', pIndex) ? '' : getLengthMainText(getShapeLengthValueText(shape, pIndex)),
-                  fontSize: getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'length', pIndex, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
-                  offsetX: getShapeLengthTextOffsetX(
-                    shape,
-                    pIndex,
-                    isShapeGuideItemBlank(shape, 'length', pIndex) ? '' : getLengthMainText(getShapeLengthValueText(shape, pIndex)),
-                    getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                    toolStore.showGuideUnit
-                  ),
-                  offsetY: (getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE) * 0.45,
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-${pIndex}`)!.sprite.height,
                   listening: true,
                   shadowColor: isGuideTextHighlighted(shape.id, 'length', pIndex) ? '#38BDF8' : 'transparent',
                   shadowBlur: isGuideTextHighlighted(shape.id, 'length', pIndex) ? 8 : 0,
@@ -2861,29 +3081,6 @@ defineExpose({ exportImage })
                 @mouseleave="handleGuideTextMouseLeave"
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'length', pIndex, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', pIndex, $event)"
-              />
-              <v-text
-                v-if="shouldRenderCanvasShapeGuideValue() && !isShapeGuideItemBlank(shape, 'length', pIndex) && isShapeGuideItemVisible(shape, 'length', pIndex) && toolStore.showGuideUnit"
-                :config="{
-                  x: getShapeLengthUnitX(
-                    shape,
-                    pIndex,
-                    getShapeGuideLabelWorldPos(shape, 'length', pIndex).x,
-                    getLengthMainText(getShapeLengthValueText(shape, pIndex)),
-                    getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                    toolStore.showGuideUnit
-                  ),
-                  y: getUnitYFromCenteredText(
-                    getShapeGuideLabelWorldPos(shape, 'length', pIndex).y,
-                    getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
-                  ),
-                  text: 'cm',
-                  fontSize: getShapeGuideItemStyle(shape, 'length', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'length', pIndex, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
-                  listening: false
-                }"
               />
             </template>
             <template v-if="toolStore.showHeight && isShapeGuideVisible(shape, 'height') && isShapeGuideItemVisible(shape, 'height', 0)">
@@ -2985,36 +3182,25 @@ defineExpose({ exportImage })
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'height', 0, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
               />
-              <v-text
-                v-if="false && getShapeHeightGuide(shape) && isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
+              <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`) && getShapeHeightGuide(shape) && isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
                 :config="{
-                  x: getShapeGuideBlankTextPos(shape, 'height', 0, 'unit').x,
-                  y: getShapeGuideBlankTextPos(shape, 'height', 0, 'unit').y,
-                  text: 'cm',
-                  fontSize: getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'height', 0, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0-blank-unit`)!.sprite.height,
                   listening: false
                 }"
               />
-              <v-text
-                v-if="shouldRenderCanvasShapeGuideValue() && getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0)"
+              <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`) && getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0)"
                 :config="{
-                  x: getShapeGuideLabelWorldPos(shape, 'height', 0).x,
-                  y: getShapeGuideLabelWorldPos(shape, 'height', 0).y,
-                  text: getLengthMainText(getShapeHeightValueText(shape)),
-                  fontSize: getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'height', 0, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
-                  offsetX: getLengthMainOffsetFromAnchor(
-                    getLengthMainText(getShapeHeightValueText(shape)),
-                    getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                    toolStore.showGuideUnit,
-                    'center'
-                  ),
-                  offsetY: (getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE) * 0.45,
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-height-0`)!.sprite.height,
                   listening: true
                 }"
                 @dblclick="handleShapeGuideValueDblClick(shape, 'height', 0, $event)"
@@ -3022,28 +3208,6 @@ defineExpose({ exportImage })
                 @mouseleave="handleGuideTextMouseLeave"
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'height', 0, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'height', 0, $event)"
-              />
-              <v-text
-                v-if="shouldRenderCanvasShapeGuideValue() && getShapeHeightGuide(shape) && !isShapeGuideItemBlank(shape, 'height', 0) && toolStore.showGuideUnit"
-                :config="{
-                  x: getLengthUnitXFromAnchor(
-                    getShapeGuideLabelWorldPos(shape, 'height', 0).x,
-                    getLengthMainText(getShapeHeightValueText(shape)),
-                    getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                    toolStore.showGuideUnit,
-                    'center'
-                  ),
-                  y: getUnitYFromCenteredText(
-                    getShapeGuideLabelWorldPos(shape, 'height', 0).y,
-                    getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
-                  ),
-                  text: 'cm',
-                  fontSize: getShapeGuideItemStyle(shape, 'height', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'height', 0, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
-                  listening: false
-                }"
               />
             </template>
             <template v-for="angleIndex in getShapeAutoAngleIndices(shape, toolStore.angleDisplayMode)" :key="`${shape.id}-angle-${angleIndex}`">
@@ -3105,40 +3269,25 @@ defineExpose({ exportImage })
                 @mousedown="handleShapeGuideTextMouseDown(shape.id, 'angle', angleIndex, $event)"
                 @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'angle', angleIndex, $event)"
               />
-              <v-text
-                v-if="false && toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
+              <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`) && toolStore.showAngle && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
                 :config="{
-                  x: getShapeGuideBlankTextPos(shape, 'angle', angleIndex, 'suffix').x - 3,
-                  y: getShapeGuideBlankTextPos(shape, 'angle', angleIndex, 'suffix').y - 3,
-                  text: '°',
-                  fontSize: getShapeGuideItemStyle(shape, 'angle', angleIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'angle', angleIndex, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}-blank-suffix`)!.sprite.height,
                   listening: false
                 }"
               />
-              <v-text
-                v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
+              <v-image
+                v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`) && toolStore.showAngle && (toolStore.angleDisplayMode === 'all' || shape.type === 'angle-line') && isShapeGuideVisible(shape, 'angle') && isShapeGuideItemVisible(shape, 'angle', angleIndex) && !isShapeGuideItemBlank(shape, 'angle', angleIndex) && !isDetachedShapeGuideItem(shape, 'angle', angleIndex)"
                 :config="{
-                  x: getShapeGuideLabelWorldPos(shape, 'angle', angleIndex).x,
-                  y: getShapeGuideLabelWorldPos(shape, 'angle', angleIndex).y,
-                  text: getShapeAngleValueText(shape, angleIndex),
-                  fontSize: getShapeGuideItemStyle(shape, 'angle', angleIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                  fill: getShapeGuideTextColor(shape, 'angle', angleIndex, DEFAULT_TEXT_COLOR),
-                  fontStyle: 'normal',
-                  offsetX: getShapeAngleTextOffsetX(
-                    shape,
-                    angleIndex,
-                    getShapeAngleValueText(shape, angleIndex),
-                    getShapeGuideItemStyle(shape, 'angle', angleIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
-                  ),
-                  offsetY: getShapeAngleTextOffsetY(
-                    shape,
-                    angleIndex,
-                    getShapeGuideItemStyle(shape, 'angle', angleIndex).fontSize || DEFAULT_TEXT_FONT_SIZE
-                  ),
+                  image: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.sprite.image,
+                  x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.sprite),
+                  y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.sprite),
+                  width: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.sprite.width,
+                  height: getRuntimeShapeGuideLatexSprite(`${shape.id}-angle-${angleIndex}`)!.sprite.height,
                   listening: true,
                   shadowColor: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? '#38BDF8' : 'transparent',
                   shadowBlur: isGuideTextHighlighted(shape.id, 'angle', angleIndex) ? 8 : 0,
@@ -3175,17 +3324,15 @@ defineExpose({ exportImage })
                   @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', pIndex, $event)"
                   @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', pIndex, $event)"
                 />
-                <v-text
-                  v-if="shouldRenderCanvasPointName() && !isShapeGuideItemBlank(shape, 'pointName', pIndex) && isShapeGuideItemVisible(shape, 'pointName', pIndex)"
+                <v-image
+                  v-if="getRuntimePointLatexSprite(shape.id, pIndex) && !isShapeGuideItemBlank(shape, 'pointName', pIndex) && isShapeGuideItemVisible(shape, 'pointName', pIndex)"
                   @dblclick="handlePointLabelDblClick(shape, pIndex, $event)"
                   :config="{
-                    x: getShapePointNameTextPos(shape, pIndex).x,
-                    y: getShapePointNameTextPos(shape, pIndex).y,
-                    text: formatMathText(getGlobalPointLabel(shape.id, pIndex)),
-                    fontSize: getShapeGuideItemStyle(shape, 'pointName', pIndex).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                    fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                    fill: getShapeGuideTextColor(shape, 'pointName', pIndex, getShapeGuideFallbackTextColor(shape, 'pointName', pIndex)),
-                    fontStyle: 'normal',
+                    image: getRuntimePointLatexSprite(shape.id, pIndex)!.sprite.image,
+                    x: getRuntimeLatexImageX(getRuntimePointLatexSprite(shape.id, pIndex)!.overlay, getRuntimePointLatexSprite(shape.id, pIndex)!.sprite),
+                    y: getRuntimeLatexImageY(getRuntimePointLatexSprite(shape.id, pIndex)!.overlay, getRuntimePointLatexSprite(shape.id, pIndex)!.sprite),
+                    width: getRuntimePointLatexSprite(shape.id, pIndex)!.sprite.width,
+                    height: getRuntimePointLatexSprite(shape.id, pIndex)!.sprite.height,
                     listening: true,
                     shadowColor: isGuideTextHighlighted(shape.id, 'pointName', pIndex) ? '#38BDF8' : 'transparent',
                     shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', pIndex) ? 8 : 0,
@@ -3200,7 +3347,7 @@ defineExpose({ exportImage })
             </template>
           </template>
 
-          <!-- ??-->
+          <!-- 원 -->
           <template v-else>
             <v-circle
               @click="handleShapeNodeClick(shape.id, $event)"
@@ -3297,17 +3444,15 @@ defineExpose({ exportImage })
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', 0, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 0, $event)"
             />
-            <v-text
-              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
+            <v-image
+              v-if="getRuntimePointLatexSprite(shape.id, 0) && toolStore.showPointName && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 0) && !isShapeGuideItemBlank(shape, 'pointName', 0)"
               @dblclick="handlePointLabelDblClick(shape, 0, $event)"
               :config="{
-                x: getShapePointNameTextPos(shape, 0).x,
-                y: getShapePointNameTextPos(shape, 0).y,
-                text: formatMathText(getGlobalPointLabel(shape.id, 0)),
-                fontSize: getShapeGuideItemStyle(shape, 'pointName', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'pointName', 0, getShapeGuideFallbackTextColor(shape, 'pointName', 0)),
-                fontStyle: 'normal',
+                image: getRuntimePointLatexSprite(shape.id, 0)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimePointLatexSprite(shape.id, 0)!.overlay, getRuntimePointLatexSprite(shape.id, 0)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimePointLatexSprite(shape.id, 0)!.overlay, getRuntimePointLatexSprite(shape.id, 0)!.sprite),
+                width: getRuntimePointLatexSprite(shape.id, 0)!.sprite.width,
+                height: getRuntimePointLatexSprite(shape.id, 0)!.sprite.height,
                 listening: true,
                 shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 0) ? '#38BDF8' : 'transparent',
                 shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 0) ? 8 : 0,
@@ -3340,17 +3485,15 @@ defineExpose({ exportImage })
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', 1, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 1, $event)"
             />
-            <v-text
-              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && shape.points[1] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 1) && !isShapeGuideItemBlank(shape, 'pointName', 1)"
+            <v-image
+              v-if="getRuntimePointLatexSprite(shape.id, 1) && toolStore.showPointName && shape.points[1] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 1) && !isShapeGuideItemBlank(shape, 'pointName', 1)"
               @dblclick="handlePointLabelDblClick(shape, 1, $event)"
               :config="{
-                x: getShapePointNameTextPos(shape, 1).x,
-                y: getShapePointNameTextPos(shape, 1).y,
-                text: formatMathText(getGlobalPointLabel(shape.id, 1)),
-                fontSize: getShapeGuideItemStyle(shape, 'pointName', 1).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'pointName', 1, getShapeGuideFallbackTextColor(shape, 'pointName', 1)),
-                fontStyle: 'normal',
+                image: getRuntimePointLatexSprite(shape.id, 1)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimePointLatexSprite(shape.id, 1)!.overlay, getRuntimePointLatexSprite(shape.id, 1)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimePointLatexSprite(shape.id, 1)!.overlay, getRuntimePointLatexSprite(shape.id, 1)!.sprite),
+                width: getRuntimePointLatexSprite(shape.id, 1)!.sprite.width,
+                height: getRuntimePointLatexSprite(shape.id, 1)!.sprite.height,
                 listening: true,
                 shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 1) ? '#38BDF8' : 'transparent',
                 shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 1) ? 8 : 0,
@@ -3383,17 +3526,15 @@ defineExpose({ exportImage })
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'pointName', 2, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'pointName', 2, $event)"
             />
-            <v-text
-              v-if="shouldRenderCanvasPointName() && toolStore.showPointName && shape.points[2] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 2) && !isShapeGuideItemBlank(shape, 'pointName', 2)"
+            <v-image
+              v-if="getRuntimePointLatexSprite(shape.id, 2) && toolStore.showPointName && shape.points[2] && isShapeGuideVisible(shape, 'pointName') && isShapeGuideItemVisible(shape, 'pointName', 2) && !isShapeGuideItemBlank(shape, 'pointName', 2)"
               @dblclick="handlePointLabelDblClick(shape, 2, $event)"
               :config="{
-                x: getShapePointNameTextPos(shape, 2).x,
-                y: getShapePointNameTextPos(shape, 2).y,
-                text: formatMathText(getGlobalPointLabel(shape.id, 2)),
-                fontSize: getShapeGuideItemStyle(shape, 'pointName', 2).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'pointName', 2, getShapeGuideFallbackTextColor(shape, 'pointName', 2)),
-                fontStyle: 'normal',
+                image: getRuntimePointLatexSprite(shape.id, 2)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimePointLatexSprite(shape.id, 2)!.overlay, getRuntimePointLatexSprite(shape.id, 2)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimePointLatexSprite(shape.id, 2)!.overlay, getRuntimePointLatexSprite(shape.id, 2)!.sprite),
+                width: getRuntimePointLatexSprite(shape.id, 2)!.sprite.width,
+                height: getRuntimePointLatexSprite(shape.id, 2)!.sprite.height,
                 listening: true,
                 shadowColor: isGuideTextHighlighted(shape.id, 'pointName', 2) ? '#38BDF8' : 'transparent',
                 shadowBlur: isGuideTextHighlighted(shape.id, 'pointName', 2) ? 8 : 0,
@@ -3466,37 +3607,25 @@ defineExpose({ exportImage })
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'length', 0, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', 0, $event)"
             />
-            <v-text
-              v-if="false && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
+            <v-image
+              v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`) && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
               :config="{
-                x: getShapeGuideBlankTextPos(shape, 'length', 0, 'unit').x,
-                y: getShapeGuideBlankTextPos(shape, 'length', 0, 'unit').y,
-                text: 'cm',
-                fontSize: getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'length', 0, DEFAULT_TEXT_COLOR),
-                fontStyle: 'normal',
+                image: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.sprite),
+                width: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.sprite.width,
+                height: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0-blank-unit`)!.sprite.height,
                 listening: false
               }"
             />
-            <v-text
-              v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0)"
+            <v-image
+              v-if="getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`) && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0)"
               :config="{
-                x: getCircleLengthLabelWorldPos(shape).x,
-                y: getCircleLengthLabelWorldPos(shape).y,
-                text: isShapeGuideItemBlank(shape, 'length', 0) ? '' : getLengthMainText(getCircleLengthValueText(shape)),
-                fontSize: getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'length', 0, DEFAULT_TEXT_COLOR),
-                fontStyle: 'normal',
-                offsetX: getShapeLengthTextOffsetX(
-                  shape,
-                  0,
-                  isShapeGuideItemBlank(shape, 'length', 0) ? '' : getLengthMainText(getCircleLengthValueText(shape)),
-                  getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  toolStore.showGuideUnit
-                ),
-                offsetY: (getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE) * 0.45,
+                image: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.sprite.image,
+                x: getRuntimeLatexImageX(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.sprite),
+                y: getRuntimeLatexImageY(getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.overlay, getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.sprite),
+                width: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.sprite.width,
+                height: getRuntimeShapeGuideLatexSprite(`${shape.id}-length-0`)!.sprite.height,
                 listening: true,
                 shadowColor: isGuideTextHighlighted(shape.id, 'length', 0) ? '#38BDF8' : 'transparent',
                 shadowBlur: isGuideTextHighlighted(shape.id, 'length', 0) ? 8 : 0,
@@ -3506,29 +3635,6 @@ defineExpose({ exportImage })
               @mouseleave="handleGuideTextMouseLeave"
               @mousedown="handleShapeGuideTextMouseDown(shape.id, 'length', 0, $event)"
               @contextmenu="handleShapeGuideItemContextMenu(shape.id, 'length', 0, $event)"
-            />
-            <v-text
-              v-if="shouldRenderCanvasShapeGuideValue() && toolStore.showLength && isShapeGuideVisible(shape, 'radius') && isShapeGuideItemVisible(shape, 'length', 0) && !isShapeGuideItemBlank(shape, 'length', 0) && toolStore.showGuideUnit"
-              :config="{
-                x: getShapeLengthUnitX(
-                  shape,
-                  0,
-                  getCircleLengthLabelWorldPos(shape).x,
-                  getLengthMainText(getCircleLengthValueText(shape)),
-                  getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                  toolStore.showGuideUnit
-                ),
-                y: getUnitYFromCenteredText(
-                  getCircleLengthLabelWorldPos(shape).y,
-                  getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE
-                ),
-                text: 'cm',
-                fontSize: getShapeGuideItemStyle(shape, 'length', 0).fontSize || DEFAULT_TEXT_FONT_SIZE,
-                fontFamily: DEFAULT_TEXT_FONT_FAMILY,
-                fill: getShapeGuideTextColor(shape, 'length', 0, DEFAULT_TEXT_COLOR),
-                fontStyle: 'normal',
-                listening: false
-              }"
             />
           </template>
         </template>
@@ -3915,8 +4021,8 @@ defineExpose({ exportImage })
     </v-stage>
       <CanvasLatexOverlays
         :latex-text-guide-overlays="latexTextGuideOverlays"
-        :latex-point-label-overlays="latexPointLabelOverlays"
-        :latex-shape-guide-overlays="latexShapeGuideOverlays"
+        :latex-point-label-overlays="[]"
+        :latex-shape-guide-overlays="[]"
         :zoom-scale="zoomScale"
         :viewport-offset="viewportOffset"
         :font-family="DEFAULT_TEXT_FONT_FAMILY"
