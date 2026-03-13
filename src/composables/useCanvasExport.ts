@@ -5,7 +5,8 @@ import { GRID_CONFIG } from '@/types'
 import { OPEN_SHAPE_TYPES } from '@/constants/shapeRules'
 import { useCanvasStore } from '@/stores/canvas'
 import { useToolStore } from '@/stores/tool'
-import { formatTextGuideDisplayText, renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex, toTextGuideLatex } from '@/utils/latexText'
+import { containsHangulText, renderLatexLikeHtml, toAngleLatex, toBlankAngleLatex, toBlankBoxSuffixLatex, toBlankUnitLatex, toLengthLatex, toTextGuideLatex } from '@/utils/latexText'
+import { createLatexCanvasSprite } from '@/utils/latexCanvas'
 import katexCssRaw from 'katex/dist/katex.min.css?raw'
 import katexMainRegularUrl from 'katex/dist/fonts/KaTeX_Main-Regular.woff2?url'
 import katexMainBoldUrl from 'katex/dist/fonts/KaTeX_Main-Bold.woff2?url'
@@ -34,6 +35,8 @@ type ShapeGuideVisibilityKey = ShapeGuideKey | 'radius' | 'point'
 
 type PointLike = { x: number, y: number }
 const MM_TO_PX = 96 / 25.4
+const SVG_ANGLE_FONT_SCALE = 0.94
+const SVG_POINT_NAME_FONT_SCALE = 1.04
 
 function getBlankBoxUnitMode(guide: { blankUnitMode?: 'none' | 'cm' | 'angle' }): 'none' | 'cm' | 'angle' {
   return guide.blankUnitMode === 'cm' || guide.blankUnitMode === 'angle' ? guide.blankUnitMode : 'none'
@@ -251,14 +254,15 @@ function svgHtmlEsc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 }
 
-function svgForeignObjectKatexEl(
+async function svgForeignObjectKatexEl(
   html: string,
   x: number,
   y: number,
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
   color: string,
   fontSize: number,
+  fontFamily: string,
   options?: {
     rotation?: number
     originX?: number
@@ -266,27 +270,44 @@ function svgForeignObjectKatexEl(
     align?: 'left' | 'center'
     baselineShiftPx?: number
   }
-): string {
+): Promise<string> {
   const align = options?.align || 'left'
   const baselineShiftPx = options?.baselineShiftPx ?? 0
-  const contentLiftPx = Number((fontSize * 0.18).toFixed(2))
-  const yLiftPx = Number((fontSize * 0.58).toFixed(2))
-  const wrapperStyle = [
-    'display:inline-block',
-    'position:relative',
-    `top:-${contentLiftPx}px`,
-    `color:${svgHtmlEsc(color)}`,
-    `font-size:${fontSize}px`,
-    'line-height:1',
-    'white-space:nowrap',
-    'text-rendering:geometricPrecision',
-    '-webkit-font-smoothing:antialiased',
-    align === 'center' ? 'transform:translate(-50%, 0)' : '',
-    options?.rotation !== undefined
-      ? `transform:${align === 'center' ? `translate(-50%, 0) rotate(${options.rotation}deg)` : `rotate(${options.rotation}deg)`};transform-origin:${(options?.originX ?? x) - x}px ${(options?.originY ?? y) - y}px`
-      : ''
-  ].filter(Boolean).join(';')
-  return `<foreignObject x="${x.toFixed(2)}" y="${(y + baselineShiftPx - yLiftPx).toFixed(2)}" width="${Math.max(1, width).toFixed(2)}" height="${Math.max(1, height).toFixed(2)}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="${wrapperStyle}">${html}</div></foreignObject>`
+  const sprite = await createLatexCanvasSprite({
+    html,
+    color,
+    fontSize,
+    fontFamily
+  })
+  const drawX = (align === 'center' ? x - (sprite.contentWidth * 0.5) : x) - sprite.insetX
+  const drawY = (y + baselineShiftPx) - sprite.insetY
+  const rotation = options?.rotation !== undefined
+    ? ` transform="rotate(${options.rotation} ${(options.originX ?? x).toFixed(2)} ${(options.originY ?? y).toFixed(2)})"`
+    : ''
+  return `<image x="${drawX.toFixed(2)}" y="${drawY.toFixed(2)}" width="${sprite.width.toFixed(2)}" height="${sprite.height.toFixed(2)}" href="${svgHtmlEsc(sprite.image.src)}"${rotation}/>`
+}
+
+async function svgTextGuideSpriteEl(
+  html: string,
+  anchorX: number,
+  anchorY: number,
+  color: string,
+  fontSize: number,
+  fontFamily: string,
+  rotation?: number
+): Promise<string> {
+  const sprite = await createLatexCanvasSprite({
+    html,
+    color,
+    fontSize,
+    fontFamily
+  })
+  const x = anchorX - ((sprite.contentWidth * 0.5) + sprite.insetX)
+  const y = (anchorY - (fontSize * 0.9)) - sprite.insetY
+  const transform = rotation !== undefined
+    ? ` transform="rotate(${rotation} ${anchorX.toFixed(2)} ${anchorY.toFixed(2)})"`
+    : ''
+  return `<image x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${sprite.width.toFixed(2)}" height="${sprite.height.toFixed(2)}" href="${svgHtmlEsc(sprite.image.src)}"${transform}/>`
 }
 
 let katexSvgCssPromise: Promise<string> | null = null
@@ -453,7 +474,7 @@ async function generateVectorSVG(
           if (text) {
             const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
             const width = svg.getTextWidthPx(displayText, fontSize) + 8
-            els.push(svgForeignObjectKatexEl(
+            els.push(await svgForeignObjectKatexEl(
               renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
               pos.x,
               pos.y - fontSize * 0.45,
@@ -461,6 +482,7 @@ async function generateVectorSVG(
               fontSize * 2,
               tc,
               fontSize,
+              svg.defaultTextFontFamily,
               { align: 'center' }
             ))
           }
@@ -470,14 +492,15 @@ async function generateVectorSVG(
             const upos = svg.getShapeGuideBlankTextPos(shape, 'length', pi, 'unit')
             const tc = svg.getShapeGuideTextColor(shape, 'length', pi, svg.getShapeGuideFallbackTextColor(shape, 'length', pi))
             const fontSize = gSt.fontSize || fs
-            els.push(svgForeignObjectKatexEl(
+            els.push(await svgForeignObjectKatexEl(
               renderLatexLikeHtml(toBlankUnitLatex(), true),
               upos.x,
               upos.y,
               fontSize * 3,
               fontSize * 2,
               tc,
-              fontSize
+              fontSize,
+              svg.defaultTextFontFamily
             ))
           }
         }
@@ -505,7 +528,7 @@ async function generateVectorSVG(
         if (text) {
           const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
           const width = svg.getTextWidthPx(displayText, fontSize) + 8
-          els.push(svgForeignObjectKatexEl(
+          els.push(await svgForeignObjectKatexEl(
             renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
             pos.x,
             pos.y - fontSize * 0.45,
@@ -513,6 +536,7 @@ async function generateVectorSVG(
             fontSize * 2,
             tc,
             fontSize,
+            svg.defaultTextFontFamily,
             { align: 'center' }
           ))
         }
@@ -522,14 +546,15 @@ async function generateVectorSVG(
           const upos = svg.getShapeGuideBlankTextPos(shape, 'length', 0, 'unit')
           const tc = svg.getShapeGuideTextColor(shape, 'length', 0, svg.getShapeGuideFallbackTextColor(shape, 'length', 0))
           const fontSize = gSt.fontSize || fs
-          els.push(svgForeignObjectKatexEl(
+          els.push(await svgForeignObjectKatexEl(
             renderLatexLikeHtml(toBlankUnitLatex(), true),
             upos.x,
             upos.y,
             fontSize * 3,
             fontSize * 2,
             tc,
-            fontSize
+            fontSize,
+            svg.defaultTextFontFamily
           ))
         }
       }
@@ -565,7 +590,7 @@ async function generateVectorSVG(
           if (text) {
             const displayText = toolStore.showGuideUnit ? `${mainText} cm` : mainText
             const width = svg.getTextWidthPx(displayText, fontSize) + 8
-            els.push(svgForeignObjectKatexEl(
+            els.push(await svgForeignObjectKatexEl(
               renderLatexLikeHtml(toLengthLatex(text, toolStore.showGuideUnit), true),
               pos.x,
               pos.y - fontSize * 0.45,
@@ -573,6 +598,7 @@ async function generateVectorSVG(
               fontSize * 2,
               tc,
               fontSize,
+              svg.defaultTextFontFamily,
               { align: 'center' }
             ))
           }
@@ -582,14 +608,15 @@ async function generateVectorSVG(
             const upos = svg.getShapeGuideBlankTextPos(shape, 'height', 0, 'unit')
             const tc = svg.getShapeGuideTextColor(shape, 'height', 0, svg.getShapeGuideFallbackTextColor(shape, 'height', 0))
             const fontSize = hSt.fontSize || fs
-            els.push(svgForeignObjectKatexEl(
+            els.push(await svgForeignObjectKatexEl(
               renderLatexLikeHtml(toBlankUnitLatex(), true),
               upos.x,
               upos.y,
               fontSize * 3,
               fontSize * 2,
               tc,
-              fontSize
+              fontSize,
+              svg.defaultTextFontFamily
             ))
           }
         }
@@ -616,18 +643,20 @@ async function generateVectorSVG(
         if (!svg.isShapeGuideItemBlank(shape, 'angle', ai)) {
           const pos = svg.getShapeGuideLabelWorldPos(shape, 'angle', ai)
           const fontSize = aSt.fontSize || fs
+          const exportFontSize = Number((fontSize * SVG_ANGLE_FONT_SCALE).toFixed(2))
           if (svg.shouldRenderShapeAngleText(shape, ai, toolStore.angleDisplayMode)) {
             const text = svg.getShapeAngleValueText(shape, ai)
             const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
-            const width = svg.getTextWidthPx(text.replace(/°$/, '') + '°', fontSize) + 8
-            els.push(svgForeignObjectKatexEl(
+            const width = svg.getTextWidthPx(text.replace(/°$/, '') + '°', exportFontSize) + 8
+            els.push(await svgForeignObjectKatexEl(
               renderLatexLikeHtml(toAngleLatex(text), true),
               pos.x,
-              pos.y - svg.getShapeAngleTextOffsetY(shape, ai, fontSize),
+              pos.y - svg.getShapeAngleTextOffsetY(shape, ai, exportFontSize),
               width,
-              fontSize * 2,
+              exportFontSize * 2,
               tc,
-              fontSize,
+              exportFontSize,
+              svg.defaultTextFontFamily,
               { align: 'center' }
             ))
           }
@@ -636,14 +665,16 @@ async function generateVectorSVG(
           const spos = svg.getShapeGuideBlankTextPos(shape, 'angle', ai, 'suffix')
           const tc = svg.getShapeGuideTextColor(shape, 'angle', ai, svg.getShapeGuideFallbackTextColor(shape, 'angle', ai))
           const fontSize = aSt.fontSize || fs
-          els.push(svgForeignObjectKatexEl(
+          const exportFontSize = Number((fontSize * SVG_ANGLE_FONT_SCALE).toFixed(2))
+          els.push(await svgForeignObjectKatexEl(
             renderLatexLikeHtml(toBlankAngleLatex(), true),
             spos.x - 3,
             spos.y - 3,
-            fontSize * 2,
-            fontSize * 2,
+            exportFontSize * 2,
+            exportFontSize * 2,
             tc,
-            fontSize
+            exportFontSize,
+            svg.defaultTextFontFamily
           ))
         }
       }
@@ -661,15 +692,21 @@ async function generateVectorSVG(
         const tc = svg.getShapeGuideTextColor(shape, 'pointName', pi, svg.getShapeGuideFallbackTextColor(shape, 'pointName', pi))
         const pSt = svg.getShapeGuideItemStyle(shape, 'pointName', pi)
         const fontSize = pSt.fontSize || fs
-        const width = Math.max(svg.getTextWidthPx(label, fontSize) + 24, fontSize * 4)
-        els.push(svgForeignObjectKatexEl(
+        const exportFontSize = Number((fontSize * SVG_POINT_NAME_FONT_SCALE).toFixed(2))
+        if (containsHangulText(label)) {
+          els.push(svgKonvaTextEl(label, pos.x, pos.y, exportFontSize, tc, ff))
+          continue
+        }
+        const width = Math.max(svg.getTextWidthPx(label, exportFontSize) + 24, exportFontSize * 4)
+        els.push(await svgForeignObjectKatexEl(
           renderLatexLikeHtml(label, true),
           pos.x,
           pos.y,
           width,
-          fontSize * 2,
+          exportFontSize * 2,
           tc,
-          fontSize
+          exportFontSize,
+          svg.defaultTextFontFamily
         ))
       }
     }
@@ -682,21 +719,25 @@ async function generateVectorSVG(
       const gc = guide.color || svg.defaultTextColor
       const anchor = svg.getTextGuideAnchor(guide)
       const rotation = svg.getTextGuideRotation(guide)
-      const width = svg.getTextWidthPx(guide.text, gfs) + 32
-      els.push(svgForeignObjectKatexEl(
+      if (!guide.useLatex && containsHangulText(guide.text)) {
+        const displayText = svg.formatMathText(guide.text)
+        const width = svg.getTextWidthPx(displayText, gfs)
+        els.push(svgKonvaTextEl(displayText, anchor.x, anchor.y - (gfs * 0.45), gfs, gc, ff, {
+          offsetX: width * 0.5,
+          rotation,
+          rotationOriginX: anchor.x,
+          rotationOriginY: anchor.y
+        }))
+        continue
+      }
+      els.push(await svgTextGuideSpriteEl(
         renderLatexLikeHtml(toTextGuideLatex(guide.text, !!guide.useLatex), !!guide.useLatex),
         anchor.x,
-        anchor.y - gfs * 0.45,
-        Math.max(svg.getTextWidthPx(formatTextGuideDisplayText(guide.text), gfs) + 32, width),
-        gfs * 2.2,
+        anchor.y,
         gc,
         gfs,
-        {
-          align: 'center',
-          rotation,
-          originX: anchor.x,
-          originY: anchor.y
-        }
+        svg.defaultTextFontFamily,
+        rotation
       ))
     } else if (guide.type === 'blank-box' && guide.points.length >= 2) {
       const centerX = (guide.points[0].x + guide.points[1].x) / 2
@@ -718,14 +759,15 @@ async function generateVectorSVG(
         const suffixY = y + (height / 2) - (fontSize * 0.45) + latexOffset.y
         const suffixLatex = toBlankBoxSuffixLatex(unitMode)
         if (suffixLatex) {
-          els.push(svgForeignObjectKatexEl(
+          els.push(await svgForeignObjectKatexEl(
             renderLatexLikeHtml(suffixLatex, true),
             suffixX,
             suffixY,
             Math.max(fontSize * 3, 24),
             fontSize * 2,
             svg.defaultTextColor,
-            fontSize
+            fontSize,
+            svg.defaultTextFontFamily
           ))
         } else {
           els.push(svgKonvaTextEl(suffixText, suffixX, suffixY, fontSize, svg.defaultTextColor, ff))

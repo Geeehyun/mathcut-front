@@ -214,7 +214,6 @@ function isShapePointDefaultVisible(shape: Shape): boolean {
     || shape.type === 'segment'
     || shape.type === 'ray'
     || shape.type === 'line'
-    || shape.type === 'angle-line'
     || shape.type === 'circle'
 }
 

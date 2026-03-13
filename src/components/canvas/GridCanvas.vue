@@ -110,7 +110,7 @@ const HEIGHT_LABEL_HORIZONTAL_OFFSET_PX = 8
 const BASE_LABEL_VERTICAL_BIAS_PX = 8
 const RIGHT_ANGLE_MARKER_SIZE = 9
 const GUIDE_RIGHT_ANGLE_MARKER_SIZE = 10
-const POINT_VISIBLE_DEFAULT_TYPES = new Set(['segment', 'ray', 'line', 'angle-line'])
+const POINT_VISIBLE_DEFAULT_TYPES = new Set(['segment', 'ray', 'line'])
 const MM_TO_PX = 96 / 25.4
 const BLANK_BASE_HEIGHT_MM = 7
 const BLANK_BASE_WIDTH_MM = 7
@@ -3969,6 +3969,83 @@ defineExpose({ exportImage, createPngDataUrl })
               </template>
             </template>
           </template>
+        </template>
+        <template v-if="toolStore.mode === 'shape' && toolStore.tempPoints.length > 0">
+          <v-line
+            v-if="toolStore.tempPoints.length > 1 && toolStore.shapeType !== 'arrow-curve'"
+            :config="{
+              points: getPolygonPoints(toolStore.tempPoints),
+              stroke: '#FF9800',
+              strokeWidth: 2,
+              dash: [5, 5]
+            }"
+          />
+          <v-circle
+            v-if="toolStore.shapeType === 'circle' && toolStore.tempPoints.length === 2"
+            :config="{
+              x: toolStore.tempPoints[0].x,
+              y: toolStore.tempPoints[0].y,
+              radius: calculateDistancePixels(toolStore.tempPoints[0], toolStore.tempPoints[1]),
+              stroke: '#FF9800',
+              strokeWidth: 2,
+              dash: [5, 5]
+            }"
+          />
+          <v-line
+            v-if="(toolStore.shapeType === 'arrow' || toolStore.shapeType === 'arrow-curve') && mousePos && toolStore.tempPoints.length >= 1"
+            :config="{
+              points: getArrowPreviewShaftPoints(),
+              stroke: '#FB923C',
+              strokeWidth: 2,
+              dash: [5, 5],
+              lineCap: 'round',
+              lineJoin: 'round'
+            }"
+          />
+          <v-line
+            v-if="(toolStore.shapeType === 'arrow' || toolStore.shapeType === 'arrow-curve') && mousePos && toolStore.tempPoints.length >= 1"
+            :config="{
+              points: getArrowPreviewHeadPoints(),
+              stroke: '#FB923C',
+              fill: '#FB923C',
+              closed: true,
+              strokeWidth: 2,
+              dash: [5, 5],
+              lineCap: 'round',
+              lineJoin: 'round'
+            }"
+          />
+          <v-line
+            v-if="toolStore.shapeType !== 'circle' && toolStore.shapeType !== 'arrow' && toolStore.shapeType !== 'arrow-curve' && mousePos"
+            :config="{
+              points: getPolygonPoints(getPreviewPoints()),
+              stroke: '#FB923C',
+              strokeWidth: 2,
+              dash: [5, 5],
+              closed: !OPEN_SHAPE_TYPES.has(toolStore.shapeType)
+            }"
+          />
+          <v-circle
+            v-for="(point, index) in toolStore.tempPoints"
+            :key="`temp-overlay-${index}`"
+            :config="{
+              x: point.x,
+              y: point.y,
+              radius: 4,
+              fill: '#FF9800',
+              listening: false
+            }"
+          />
+          <v-circle
+            v-if="toolStore.shapeType === 'polygon' && toolStore.tempPoints.length > 1"
+            :config="{
+              x: toolStore.tempPoints[0].x,
+              y: toolStore.tempPoints[0].y,
+              radius: 2,
+              fill: '#FFFFFF',
+              listening: false
+            }"
+          />
         </template>
         <template
           v-if="toolStore.mode === 'select' && selectedTextGuideId && selectedTextGuideTransformUI && !textGuideTransformDrag"

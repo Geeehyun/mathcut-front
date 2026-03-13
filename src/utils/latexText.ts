@@ -17,7 +17,7 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function containsHangul(input: string): boolean {
+export function containsHangulText(input: string): boolean {
   return /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/.test(input)
 }
 
@@ -25,7 +25,7 @@ export function renderLatexLikeHtml(input: string, useMathMode: boolean): string
   const source = input || ''
   if (!source) return ''
 
-  if (containsHangul(source)) {
+  if (containsHangulText(source)) {
     return `<span>${escapeHtml(source)}</span>`
   }
 
@@ -77,7 +77,11 @@ export function toBlankBoxSuffixLatex(mode: 'none' | 'cm' | 'angle'): string {
 export function toAngleLatex(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return ''
-  if (trimmed.endsWith('°')) {
+  if (trimmed.endsWith('\u00B0')) {
+    const main = trimmed.slice(0, -1).trim()
+    return main ? `${main}^{\\circ}` : '\\circ'
+  }
+  if (trimmed.endsWith('\uC9F8')) {
     return `${trimmed.slice(0, -1).trim()}^\\circ`
   }
   return trimmed

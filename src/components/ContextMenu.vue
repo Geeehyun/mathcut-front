@@ -280,7 +280,6 @@ const shapeGuideVisibility = computed(() => ({
       || targetShape.value?.type === 'segment'
       || targetShape.value?.type === 'ray'
       || targetShape.value?.type === 'line'
-      || targetShape.value?.type === 'angle-line'
       || targetShape.value?.type === 'circle'
     ),
   height: typeof targetShape.value?.guideVisibility?.height === 'boolean'
